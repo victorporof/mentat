@@ -46,15 +46,15 @@ use mentat_core::{
     attribute,
     Attribute,
     AttributeBitFlags,
+    AttributeMap,
     Entid,
     FromMicros,
     IdentMap,
     Schema,
-    AttributeMap,
-    TypedValue,
     ToMicros,
-    ValueType,
+    TypedValue,
     ValueRc,
+    ValueType,
 };
 
 use errors::{
@@ -1111,7 +1111,7 @@ impl PartitionMapping for PartitionMap {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     extern crate env_logger;
 
     use super::*;
@@ -1183,10 +1183,10 @@ mod tests {
 
     // A connection that doesn't try to be clever about possibly sharing its `Schema`.  Compare to
     // `mentat::Conn`.
-    struct TestConn {
-        sqlite: rusqlite::Connection,
-        partition_map: PartitionMap,
-        schema: Schema,
+    pub(crate) struct TestConn {
+        pub(crate) sqlite: rusqlite::Connection,
+        pub(crate) partition_map: PartitionMap,
+        pub(crate) schema: Schema,
     }
 
     impl TestConn {
@@ -1198,7 +1198,7 @@ mod tests {
             assert_eq!(materialized_schema, self.schema);
         }
 
-        fn transact<I>(&mut self, transaction: I) -> Result<TxReport> where I: Borrow<str> {
+        pub(crate) fn transact<I>(&mut self, transaction: I) -> Result<TxReport> where I: Borrow<str> {
             // Failure to parse the transaction is a coding error, so we unwrap.
             let entities = edn::parse::entities(transaction.borrow()).expect(format!("to be able to parse {} into entities", transaction.borrow()).as_str());
 
@@ -1247,19 +1247,19 @@ mod tests {
             Ok(report)
         }
 
-        fn last_tx_id(&self) -> Entid {
+        pub(crate) fn last_tx_id(&self) -> Entid {
             self.partition_map.get(&":db.part/tx".to_string()).unwrap().index - 1
         }
 
-        fn last_transaction(&self) -> edn::Value {
+        pub(crate) fn last_transaction(&self) -> edn::Value {
             debug::transactions_after(&self.sqlite, &self.schema, self.last_tx_id() - 1).expect("last_transaction").0[0].into_edn()
         }
 
-        fn datoms(&self) -> edn::Value {
+        pub(crate) fn datoms(&self) -> edn::Value {
             debug::datoms_after(&self.sqlite, &self.schema, bootstrap::TX0).expect("datoms").into_edn()
         }
 
-        fn fulltext_values(&self) -> edn::Value {
+        pub(crate) fn fulltext_values(&self) -> edn::Value {
             debug::fulltext_values(&self.sqlite).expect("fulltext_values").into_edn()
         }
 
