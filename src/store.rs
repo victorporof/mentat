@@ -14,10 +14,6 @@ use std::collections::{
     BTreeMap,
 };
 
-use std::path::{
-    Path,
-};
-
 use std::sync::{
     Arc,
 };
@@ -204,8 +200,13 @@ impl Pullable for Store {
 
 impl Syncable for Store {
     fn sync(&mut self, server_uri: &String, user_uuid: &String) -> Result<()> {
-        let uuid = Uuid::parse_str(&user_uuid).map_err(|_| MentatError::BadUuid(user_uuid.clone()))?;
-        Ok(Syncer::flow(&mut self.sqlite, server_uri, &uuid)?)
+        let uuid = Uuid::parse_str(&user_uuid)?;
+
+        let mut tx = self.sqlite.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let result = Syncer::flow(&mut tx, server_uri, &uuid)?;
+        tx.commit()?;
+
+        Ok(result)
     }
 }
 
@@ -219,6 +220,7 @@ mod tests {
         BTreeSet,
     };
     use std::path::{
+        Path,
         PathBuf,
     };
     use std::sync::mpsc;
