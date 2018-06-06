@@ -35,17 +35,21 @@ use mentat_core::{
 };
 
 use mentat::{
+    Binding,
     CacheDirection,
     Keyword,
-    Queryable,
     QueryExplanation,
     QueryOutput,
     QueryResults,
+    Queryable,
     Store,
-    Binding,
-    Syncable,
     TxReport,
     TypedValue,
+};
+
+#[cfg(feature = "syncable")]
+use mentat::{
+    Syncable,
 };
 
 use command_parser::{
@@ -65,7 +69,6 @@ use command_parser::{
     COMMAND_QUERY_EXPLAIN_SHORT,
     COMMAND_QUERY_PREPARED_LONG,
     COMMAND_SCHEMA,
-    COMMAND_SYNC,
     COMMAND_TIMER_LONG,
     COMMAND_TRANSACT_LONG,
     COMMAND_TRANSACT_SHORT,
@@ -78,6 +81,11 @@ use command_parser::{
 #[cfg(feature = "sqlcipher")]
 use command_parser::{
     COMMAND_OPEN_ENCRYPTED,
+};
+
+#[cfg(feature = "syncable")]
+use command_parser::{
+    COMMAND_SYNC,
 };
 
 use input::InputReader;
@@ -119,7 +127,9 @@ lazy_static! {
             (COMMAND_TIMER_LONG, "Enable or disable timing of query and transact operations."),
 
             (COMMAND_CACHE, "Cache an attribute. Usage: `.cache :foo/bar reverse`"),
-            (COMMAND_SYNC, "Synchronize the database against a Sync Server URL for a provided user UUID."),
+
+            #[cfg(feature = "syncable")]
+            (COMMAND_SYNC, "Synchronize the database against a Mentat Sync Server URL for a provided user UUID."),
         ]
     };
 }
@@ -342,12 +352,20 @@ impl Repl {
                     Err(e) => eprintln!("{}", e)
                 };
             },
+
+            #[cfg(feature = "syncable")]
             Command::Sync(args) => {
                 match self.store.sync(&args[0], &args[1]) {
                     Ok(_) => println!("Synced!"),
                     Err(e) => eprintln!("{:?}", e)
                 };
-            }
+            },
+
+            #[cfg(not(feature = "syncable"))]
+            Command::Sync(_) => {
+                eprintln!(".sync requires the syncable Mentat feature");
+            },
+
             Command::Timer(on) => {
                 self.toggle_timer(on);
             },

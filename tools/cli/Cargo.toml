@@ -7,6 +7,7 @@ version = "0.0.1"
 default = ["bundled_sqlite3"]
 sqlcipher = ["mentat/sqlcipher"]
 bundled_sqlite3 = ["mentat/bundled_sqlite3"]
+syncable = ["mentat/syncable"]
 
 [lib]
 name = "mentat_cli"
