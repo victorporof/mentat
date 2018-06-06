@@ -31,8 +31,9 @@ extern crate mentat_core;
 extern crate rusqlite;
 extern crate uuid;
 
-#[macro_use]
-pub mod errors;
+#[macro_use] pub mod errors;
+mod remote_client;
+
 pub mod schema;
 pub mod metadata;
 pub mod tx_processor;
