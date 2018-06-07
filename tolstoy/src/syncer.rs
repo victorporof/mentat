@@ -29,6 +29,7 @@ use remote_client::{
 
 use tx_processor::{
     Processor,
+    Tx,
     TxReceiver,
     TxPart,
 };
@@ -166,8 +167,16 @@ impl<'c> TxReceiver for UploadingTxReceiver<'c> {
     }
 }
 
+pub enum SyncResult {
+    EmptyServer,
+    NoChanges,
+    ServerFastForward,
+    LocalFastForward(Vec<Tx>),
+    Merge,
+}
+
 impl Syncer {
-    fn upload_ours(db_tx: &mut rusqlite::Transaction, from_tx: Option<Entid>, remote_client: &RemoteClient, remote_head: &Uuid) -> Result<()> {
+    fn fast_forward_server(db_tx: &mut rusqlite::Transaction, from_tx: Option<Entid>, remote_client: &RemoteClient, remote_head: &Uuid) -> Result<()> {
         let mut uploader = UploadingTxReceiver::new(remote_client, remote_head);
         Processor::process(db_tx, from_tx, &mut uploader)?;
         if !uploader.is_done {
@@ -179,7 +188,7 @@ impl Syncer {
             // Upload remote head.
             remote_client.put_head(&last_tx_uploaded)?;
 
-            // On succes:
+            // On success:
             // - persist local mappings from the receiver
             // - update our local "remote head".
             TxMapper::set_bulk(db_tx, &uploader.tx_temp_uuids)?;
@@ -189,7 +198,7 @@ impl Syncer {
         Ok(())
     }
 
-    pub fn flow(db_tx: &mut rusqlite::Transaction, server_uri: &String, user_uuid: &Uuid) -> Result<()> {
+    pub fn flow(db_tx: &mut rusqlite::Transaction, server_uri: &String, user_uuid: &Uuid) -> Result<SyncResult> {
         d(&format!("sync flowing"));
 
         ensure_current_version(db_tx)?;
@@ -200,7 +209,7 @@ impl Syncer {
         let remote_head = remote_client.get_head()?;
         d(&format!("remote head {:?}", remote_head));
 
-        let locally_known_remote_head = SyncMetadataClient::remote_head(&db_tx)?;
+        let locally_known_remote_head = SyncMetadataClient::remote_head(db_tx)?;
         d(&format!("local head {:?}", locally_known_remote_head));
 
         // Local head: latest transaction that we have in the store,
@@ -215,20 +224,21 @@ impl Syncer {
         if !inquiring_tx_receiver.is_done {
             bail!(TolstoyError::TxProcessorUnfinished);
         }
-        let have_local_changes = match inquiring_tx_receiver.last_tx {
+        let (have_local_changes, local_store_empty) = match inquiring_tx_receiver.last_tx {
             Some(tx) => {
-                match TxMapper::get(&db_tx, tx)? {
-                    Some(_) => false,
-                    None => true
+                match TxMapper::get(db_tx, tx)? {
+                    Some(_) => (false, false),
+                    None => (true, false)
                 }
             },
-            None => false
+            None => (false, true)
         };
 
         // Check if the server is empty - populate it.
         if remote_head == Uuid::nil() {
             d(&format!("empty server!"));
-            Syncer::upload_ours(db_tx, None, &remote_client, &remote_head)?;
+            Syncer::fast_forward_server(db_tx, None, &remote_client, &remote_head)?;
+            return Ok(SyncResult::EmptyServer);
         
         // Check if the server is the same as us, and if our HEAD moved.
         } else if locally_known_remote_head == remote_head {
@@ -236,33 +246,38 @@ impl Syncer {
             
             if !have_local_changes {
                 d(&format!("local HEAD did not move. Nothing to do!"));
-                return Ok(());
+                return Ok(SyncResult::NoChanges);
             }
 
             d(&format!("local HEAD moved."));
             // TODO it's possible that we've successfully advanced remote head previously,
             // but failed to advance our own local head. If that's the case, and we can recognize it,
             // our sync becomes just bumping our local head. AFAICT below would currently fail.
-            if let Some(upload_from_tx) = TxMapper::get_tx_for_uuid(&db_tx, &locally_known_remote_head)? {
+            if let Some(upload_from_tx) = TxMapper::get_tx_for_uuid(db_tx, &locally_known_remote_head)? {
                 d(&format!("Fast-forwarding the server."));
-                Syncer::upload_ours(db_tx, Some(upload_from_tx), &remote_client, &remote_head)?;
+                Syncer::fast_forward_server(db_tx, Some(upload_from_tx), &remote_client, &remote_head)?;
+                return Ok(SyncResult::ServerFastForward);
             } else {
                 d(&format!("Unable to fast-forward the server; missing local tx mapping"));
                 bail!(TolstoyError::TxIncorrectlyMapped(0));
             }
             
-        // We diverged from the server.
-        // We'll need to rebase/merge ourselves on top of it.
+        // We diverged from the server. If we're lucky, we can just fast-forward local.
+        // Otherwise, a merge (or a rebase) is required.
         } else {
             d(&format!("server changed since last sync."));
 
-            bail!(TolstoyError::NotYetImplemented(
-                format!("Can't yet sync against changed server. Local head {:?}, remote head {:?}", locally_known_remote_head, remote_head)
+            // TODO local store moved forward since we last synced. Need to merge or rebase.
+            if !local_store_empty && have_local_changes {
+                return Ok(SyncResult::Merge);
+            }
+
+            d(&format!("fast-forwarding local store."));
+            return Ok(SyncResult::LocalFastForward(
+                remote_client.get_transaction_data_after(&locally_known_remote_head)?
             ));
         }
 
         // Our caller will commit the tx with our changes when it's done.
-
-        Ok(())
     }
 }

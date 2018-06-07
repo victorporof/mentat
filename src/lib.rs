@@ -150,6 +150,14 @@ pub mod query_builder;
 pub mod store;
 pub mod vocabulary;
 
+#[cfg(feature = "syncable")]
+pub mod sync;
+
+#[cfg(feature = "syncable")]
+pub use sync::{
+    Syncable,
+};
+
 pub use query::{
     IntoResult,
     PlainSymbol,
@@ -176,7 +184,6 @@ pub use conn::{
     Metadata,
     Pullable,
     Queryable,
-    Syncable,
 };
 
 pub use store::{

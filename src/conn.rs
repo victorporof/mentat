@@ -194,10 +194,10 @@ pub trait Syncable {
 /// A transaction is held open until you do so.
 /// Your changes will be implicitly dropped along with this struct.
 pub struct InProgress<'a, 'c> {
-    transaction: rusqlite::Transaction<'c>,
+    pub(crate) transaction: rusqlite::Transaction<'c>,
     mutex: &'a Mutex<Metadata>,
     generation: u64,
-    partition_map: PartitionMap,
+    pub(crate) partition_map: PartitionMap,
     pub(crate) schema: Schema,
     pub(crate) cache: InProgressSQLiteAttributeCache,
     use_caching: bool,

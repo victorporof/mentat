@@ -34,10 +34,6 @@ use mentat_db::{
     TxObserver,
 };
 
-use mentat_tolstoy::Syncer;
-
-use uuid::Uuid;
-
 use conn::{
     CacheAction,
     CacheDirection,
@@ -46,7 +42,6 @@ use conn::{
     InProgressRead,
     Pullable,
     Queryable,
-    Syncable
 };
 
 use errors::*;
@@ -56,6 +51,11 @@ use query::{
     QueryExplanation,
     QueryInputs,
     QueryOutput,
+};
+
+#[cfg(feature = "syncable")]
+use sync::{
+    Syncable,
 };
 
 /// A convenience wrapper around a single SQLite connection and a Conn. This is suitable
@@ -198,15 +198,10 @@ impl Pullable for Store {
     }
 }
 
+#[cfg(feature = "syncable")]
 impl Syncable for Store {
     fn sync(&mut self, server_uri: &String, user_uuid: &String) -> Result<()> {
-        let uuid = Uuid::parse_str(&user_uuid)?;
-
-        let mut tx = self.sqlite.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        let result = Syncer::flow(&mut tx, server_uri, &uuid)?;
-        tx.commit()?;
-
-        Ok(result)
+        self.conn.sync(&mut self.sqlite, server_uri, user_uuid)
     }
 }
 
@@ -215,6 +210,8 @@ mod tests {
     use super::*;
 
     extern crate time;
+
+    use uuid::Uuid;
 
     use std::collections::{
         BTreeSet,

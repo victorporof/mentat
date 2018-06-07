@@ -37,9 +37,19 @@ mod remote_client;
 pub mod schema;
 pub mod metadata;
 pub mod tx_processor;
+pub use tx_processor::{
+    Tx,
+};
 pub mod syncer;
 pub mod tx_mapper;
-pub use syncer::Syncer;
+pub use tx_mapper::{
+    TxMapper,
+};
+pub use syncer::{
+    Syncer,
+    SyncResult,
+};
+pub use metadata::SyncMetadataClient;
 pub use errors::{
     TolstoyError,
     Result,

@@ -15,6 +15,7 @@ use std; // To refer to std::result::Result.
 use std::collections::BTreeSet;
 
 use rusqlite;
+use uuid;
 
 use edn;
 
@@ -112,6 +113,9 @@ pub enum MentatError {
     PullError(#[cause] mentat_query_pull::PullError),
 
     #[fail(display = "{}", _0)]
+    UuidError(#[cause] uuid::ParseError),
+
+    #[fail(display = "{}", _0)]
     SQLError(#[cause] mentat_sql::SQLError),
 
     #[cfg(feature = "syncable")]
@@ -131,11 +135,18 @@ impl From<rusqlite::Error> for MentatError {
     }
 }
 
+impl From<uuid::ParseError> for MentatError {
+    fn from(error: uuid::ParseError) -> MentatError {
+        MentatError::UuidError(error)
+    }
+}
+
 impl From<edn::ParseError> for MentatError {
     fn from(error: edn::ParseError) -> MentatError {
         MentatError::EdnParseError(error)
     }
 }
+
 
 impl From<mentat_db::DbError> for MentatError {
     fn from(error: mentat_db::DbError) -> MentatError {
