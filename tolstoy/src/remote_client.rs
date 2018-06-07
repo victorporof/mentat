@@ -45,6 +45,7 @@ use syncer::{
 };
 
 use tx_processor::{
+    Tx,
     TxPart,
 };
 
@@ -296,6 +297,36 @@ impl RemoteClient {
         d(&format!("serialized chunk: {:?}", payload));
         // TODO don't want to clone every datom!
         self.put(uri, payload, StatusCode::Created)
+    }
+
+    /// Slurp transactions and datoms after `remote_head`, returning them as owned data.
+    ///
+    /// This is inefficient but convenient for development.
+    pub(crate) fn get_transaction_data_after(&self, remote_head: &Uuid) -> Result<Vec<Tx>> {
+        let new_txs = self.get_transactions(remote_head)?;
+        let mut tx_list = Vec::new();
+
+        for tx in new_txs {
+            let mut tx_parts = Vec::new();
+            let chunks = self.get_chunks(&tx)?;
+
+            // We pass along all of the downloaded parts, including transaction's
+            // metadata datom. Transactor is expected to do the right thing, and
+            // use txInstant from one of our datoms.
+            for chunk in chunks {
+                let part = self.get_chunk(&chunk)?;
+                tx_parts.push(part);
+            }
+
+            tx_list.push(Tx {
+                tx: tx,
+                parts: tx_parts
+            });
+        }
+
+        d(&format!("got tx list: {:?}", &tx_list));
+
+        Ok(tx_list)
     }
 }
 

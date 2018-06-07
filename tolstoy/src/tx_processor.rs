@@ -11,6 +11,8 @@ use std::iter::Peekable;
 
 use rusqlite;
 
+use uuid::Uuid;
+
 use errors::{
     Result,
 };
@@ -31,6 +33,13 @@ pub struct TxPart {
     pub v: TypedValue,
     pub tx: Entid,
     pub added: bool,
+}
+
+// For returning out of the downloader as an ordered list.
+#[derive(Debug)]
+pub struct Tx {
+    pub tx: Uuid,
+    pub parts: Vec<TxPart>,
 }
 
 pub trait TxReceiver {
