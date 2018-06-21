@@ -111,7 +111,6 @@ impl RemoteClient {
         let uri = uri.parse()?;
 
         d(&format!("parsed uri {:?}", uri));
-
         let work = client.get(uri).and_then(|res| {
             println!("Response: {}", res.status());
 

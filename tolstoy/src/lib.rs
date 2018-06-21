@@ -32,25 +32,28 @@ extern crate rusqlite;
 extern crate uuid;
 
 #[macro_use] pub mod errors;
-mod remote_client;
-
-pub mod schema;
-pub mod metadata;
-pub mod tx_processor;
-pub mod syncer;
-pub mod tx_mapper;
-pub use tx_mapper::{
-    TxMapper,
+pub use errors::{
+    TolstoyError,
 };
+
+pub mod bootstrap;
+pub mod metadata;
+pub use metadata::{
+    SyncMetadataClient,
+};
+mod parts;
+mod remote_client;
+pub mod schema;
+pub mod syncer;
 pub use syncer::{
     Syncer,
     SyncResult,
 };
-pub use metadata::SyncMetadataClient;
-pub use errors::{
-    TolstoyError,
-    Result,
+pub mod tx_mapper;
+pub use tx_mapper::{
+    TxMapper,
 };
+pub mod tx_processor;
 pub mod types;
 pub use types::{
     Tx,

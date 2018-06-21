@@ -16,13 +16,18 @@ use uuid::Uuid;
 use mentat_core::{
     Entid,
 };
-use metadata::{
-    HeadTrackable,
-    SyncMetadataClient,
+use mentat_db::{
+    CORE_SCHEMA_VERSION,
+};
+use bootstrap::{
+    BootstrapHelper,
 };
 use errors::{
     TolstoyError,
     Result,
+};
+use metadata::{
+    SyncMetadataClient,
 };
 use remote_client::{
     RemoteClient,
@@ -70,6 +75,7 @@ pub struct Syncer {}
 // but it's the hammer at hand!
 // See https://github.com/mozilla/mentat/issues/572
 struct InquiringTxReceiver {
+    pub first_tx: Option<Entid>,
     pub last_tx: Option<Entid>,
     pub is_done: bool,
 }
@@ -77,6 +83,7 @@ struct InquiringTxReceiver {
 impl InquiringTxReceiver {
     fn new() -> InquiringTxReceiver {
         InquiringTxReceiver {
+            first_tx: None,
             last_tx: None,
             is_done: false,
         }
@@ -86,6 +93,10 @@ impl InquiringTxReceiver {
 impl TxReceiver for InquiringTxReceiver {
     fn tx<T>(&mut self, tx_id: Entid, _datoms: &mut T) -> Result<()>
     where T: Iterator<Item=TxPart> {
+        match self.first_tx {
+            None => self.first_tx = Some(tx_id),
+            Some(_) => ()
+        }
         self.last_tx = Some(tx_id);
         Ok(())
     }
@@ -174,9 +185,12 @@ impl<'c> TxReceiver for UploadingTxReceiver<'c> {
 }
 
 pub enum SyncResult {
+    BadServerState,
     EmptyServer,
     NoChanges,
     ServerFastForward,
+    AdoptedRemoteOnFirstSync,
+    IncompatibleBootstrapSchema,
     LocalFastForward(Vec<Tx>),
     Merge,
 }
@@ -224,8 +238,8 @@ impl Syncer {
         // In other words: if latest tx isn't mapped, then HEAD moved
         // since last sync and server needs to be updated.
         let mut inquiring_tx_receiver = InquiringTxReceiver::new();
-        // TODO don't just start from the beginning... but then again, we should do this
-        // without walking the table at all, and use the tx index.
+        // TODO we really just care about our first tx (bootstrap) and our HEAD.
+        // we don't need to walk 'transactions' to figure this out!
         Processor::process(db_tx, None, &mut inquiring_tx_receiver)?;
         if !inquiring_tx_receiver.is_done {
             bail!(TolstoyError::TxProcessorUnfinished);
@@ -239,22 +253,60 @@ impl Syncer {
             },
             None => (false, true)
         };
+        let local_bootstrap_tx = match inquiring_tx_receiver.first_tx {
+            Some(tx) => tx,
+            None => bail!(TolstoyError::UnexpectedState("Missing local bootstrap transaction.".to_string()))
+        };
 
-        // Check if the server is empty - populate it.
+        // Server is empty - populate it.
         if remote_head == Uuid::nil() {
             d(&format!("empty server!"));
             Syncer::fast_forward_server(db_tx, None, &remote_client, &remote_head)?;
             return Ok(SyncResult::EmptyServer);
-        
-        // Check if the server is the same as us, and if our HEAD moved.
+
+        // Server is not empty, and we never synced.
+        // Reconcile bootstrap transaction and adopt remote state.
+        } else if locally_known_remote_head == Uuid::nil() {
+            d(&format!("server non-empty on first sync, adopting remote state."));
+
+            let incoming_txs = remote_client.get_transaction_data_after(&locally_known_remote_head)?;
+
+            if incoming_txs.len() == 0 {
+                bail!(TolstoyError::BadServerState("Server specified non-root HEAD but gave no transactions".to_string()));
+            }
+
+            if incoming_txs.len() > 1 {
+                bail!(TolstoyError::NotYetImplemented("Can't purge local state: local excision not supported yet".to_string()));
+            }
+
+            // We assume that the first transaction encountered on first sync is the bootstrap transaction.
+            let bootstrap_tx = &incoming_txs[0];
+            let remote_bootstrap = BootstrapHelper::new(bootstrap_tx);
+            
+            if !remote_bootstrap.is_compatible()? {
+                bail!(TolstoyError::IncompatibleBootstrapSchema(CORE_SCHEMA_VERSION as i64, remote_bootstrap.core_schema_version()?));
+            }
+
+            d(&format!("mapping incoming bootstrap tx uuid to local bootstrap entid: {} -> {}", bootstrap_tx.tx, local_bootstrap_tx));
+
+            // Map incoming bootstrap tx uuid to local bootstrap entid.
+            // If there's more work to do, we'll move the head again.
+            SyncMetadataClient::set_remote_head(db_tx, &bootstrap_tx.tx)?;
+            TxMapper::set_tx_uuid(db_tx, local_bootstrap_tx, &bootstrap_tx.tx)?;
+
+            return Ok(SyncResult::AdoptedRemoteOnFirstSync);
+
+        // Server did not change since we last talked to it.
         } else if locally_known_remote_head == remote_head {
             d(&format!("server unchanged since last sync."));
             
+            // Trivial case: our HEAD did not move.
             if !have_local_changes {
                 d(&format!("local HEAD did not move. Nothing to do!"));
                 return Ok(SyncResult::NoChanges);
             }
 
+            // Our HEAD moved. Fast-forward server by uploading everything locally that is new.
             d(&format!("local HEAD moved."));
             // TODO it's possible that we've successfully advanced remote head previously,
             // but failed to advance our own local head. If that's the case, and we can recognize it,
@@ -268,8 +320,7 @@ impl Syncer {
                 bail!(TolstoyError::TxIncorrectlyMapped(0));
             }
             
-        // We diverged from the server. If we're lucky, we can just fast-forward local.
-        // Otherwise, a merge (or a rebase) is required.
+        // Server changed since we last talked to it.
         } else {
             d(&format!("server changed since last sync."));
 

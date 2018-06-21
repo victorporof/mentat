@@ -18,7 +18,6 @@ use conn::{
 };
 
 use errors::{
-    MentatError,
     Result,
 };
 
@@ -46,8 +45,8 @@ use mentat_tolstoy::{
     SyncResult,
     Tx,
     TxMapper,
+    TolstoyError,
 };
-use mentat_tolstoy::metadata::HeadTrackable;
 
 pub trait Syncable {
     fn sync(&mut self, server_uri: &String, user_uuid: &String) -> Result<()>;
@@ -124,8 +123,17 @@ impl Conn {
             SyncResult::EmptyServer => (),
             SyncResult::NoChanges => (),
             SyncResult::ServerFastForward => (),
-            SyncResult::Merge => bail!(MentatError::NotYetImplemented("Can't sync against diverged local.".into())),
+            SyncResult::Merge => bail!(TolstoyError::NotYetImplemented(
+                format!("Can't sync against diverged local.")
+            )),
             SyncResult::LocalFastForward(txs) => fast_forward_local(&mut in_progress, txs)?,
+            SyncResult::BadServerState => bail!(TolstoyError::NotYetImplemented(
+                format!("Bad server state.")
+            )),
+            SyncResult::AdoptedRemoteOnFirstSync => (),
+            SyncResult::IncompatibleBootstrapSchema => bail!(TolstoyError::NotYetImplemented(
+                format!("IncompatibleBootstrapSchema.")
+            )),
         }
 
         in_progress.commit()

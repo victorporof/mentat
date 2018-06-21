@@ -20,7 +20,6 @@ use mentat_core::{
     TypedValue,
 };
 
-
 use errors::{
     Result,
 };
@@ -134,11 +133,10 @@ impl Processor {
 
         let mut rows = stmt.query_and_then(&[], to_tx_part)?.peekable();
 
-        // If no starting tx is provided, get everything but skip over the first (bootstrap) transaction.
-        let skip_first_tx = from_tx.is_none();
-        let mut at_first_tx = true;
+        // Walk the transaction table, keeping track of the current "tx".
+        // Whenever "tx" changes, construct a datoms iterator and pass it to the receiver.
+        // NB: this logic depends on data coming out of the rows iterator to be sorted by "tx".
         let mut current_tx = None;
-
         while let Some(row) = rows.next() {
             let datom = row?;
 
@@ -154,10 +152,6 @@ impl Processor {
                 },
                 None => {
                     current_tx = Some(datom.tx);
-                    if at_first_tx && skip_first_tx {
-                        at_first_tx = false;
-                        continue;
-                    }
                     receiver.tx(
                         datom.tx,
                         &mut DatomsIterator::new(&datom, &mut rows)

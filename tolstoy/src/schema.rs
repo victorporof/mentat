@@ -11,15 +11,15 @@
 use rusqlite;
 use errors::Result;
 
-pub static REMOTE_HEAD_KEY: &str = r#"remote_head"#;
+pub static REMOTE_HEAD_KEY: &str = r"remote_head";
 
 lazy_static! {
     /// SQL statements to be executed, in order, to create the Tolstoy SQL schema (version 1).
     #[cfg_attr(rustfmt, rustfmt_skip)]
     static ref SCHEMA_STATEMENTS: Vec<&'static str> = { vec![
-        r#"CREATE TABLE IF NOT EXISTS tolstoy_tu (tx INTEGER PRIMARY KEY, uuid BLOB NOT NULL UNIQUE) WITHOUT ROWID"#,
-        r#"CREATE TABLE IF NOT EXISTS tolstoy_metadata (key BLOB NOT NULL UNIQUE, value BLOB NOT NULL)"#,
-        r#"CREATE INDEX IF NOT EXISTS idx_tolstoy_tu_ut ON tolstoy_tu (uuid, tx)"#,
+        "CREATE TABLE IF NOT EXISTS tolstoy_tu (tx INTEGER PRIMARY KEY, uuid BLOB NOT NULL UNIQUE) WITHOUT ROWID",
+        "CREATE TABLE IF NOT EXISTS tolstoy_metadata (key BLOB NOT NULL UNIQUE, value BLOB NOT NULL)",
+        "CREATE INDEX IF NOT EXISTS idx_tolstoy_tu_ut ON tolstoy_tu (uuid, tx)",
         ]
     };
 }

@@ -99,12 +99,12 @@ fn test_reader() {
     let mut conn = Conn::connect(&mut c).expect("Couldn't open DB.");
     {
         let db_tx = c.transaction().expect("db tx");
-        // Ensure that the first (bootstrap) transaction is skipped over.
+        // Ensure that we see a bootstrap transaction.
         let mut receiver = TxCountingReceiver::new();
         assert_eq!(false, receiver.is_done);
         Processor::process(&db_tx, None, &mut receiver).expect("processor");
         assert_eq!(true, receiver.is_done);
-        assert_eq!(0, receiver.tx_count);
+        assert_eq!(1, receiver.tx_count);
     }
 
     let ids = conn.transact(&mut c, r#"[
@@ -113,6 +113,11 @@ fn test_reader() {
         [:db/add "s" :db/cardinality :db.cardinality/one]
     ]"#).expect("successful transaction").tempids;
     let numba_entity_id = ids.get("s").unwrap();
+
+    let ids = conn.transact(&mut c, r#"[
+        [:db/add "b" :foo/numba 123]
+    ]"#).expect("successful transaction").tempids;
+    let _asserted_e = ids.get("b").unwrap();
 
     let first_tx;
     {
@@ -123,10 +128,11 @@ fn test_reader() {
 
         println!("{:#?}", receiver);
 
-        assert_eq!(1, receiver.txes.keys().count());
-        assert_tx_datoms_count(&receiver, 0, 4);
+        // Three transactions: bootstrap, vocab, assertion.
+        assert_eq!(3, receiver.txes.keys().count());
+        assert_tx_datoms_count(&receiver, 2, 2);
 
-        first_tx = Some(*receiver.txes.keys().nth(0).expect("first tx"));
+        first_tx = Some(*receiver.txes.keys().nth(1).expect("first non-bootstrap tx"));
     }
 
     let ids = conn.transact(&mut c, r#"[
@@ -143,11 +149,13 @@ fn test_reader() {
         // Note that we're asking for the first transacted tx to be skipped by the processor.
         Processor::process(&db_tx, first_tx, &mut receiver).expect("processor");
 
-        assert_eq!(1, receiver.txes.keys().count());
-        assert_tx_datoms_count(&receiver, 0, 2);
+        // Vocab, assertion.
+        assert_eq!(2, receiver.txes.keys().count());
+        // Assertion datoms.
+        assert_tx_datoms_count(&receiver, 1, 2);
 
-        // Inspect the transaction part.
-        let tx_id = receiver.txes.keys().nth(0).expect("tx");
+        // Inspect the assertion.
+        let tx_id = receiver.txes.keys().nth(1).expect("tx");
         let datoms = receiver.txes.get(tx_id).expect("datoms");
         let part = datoms.iter().find(|&part| &part.e == asserted_e).expect("to find asserted datom");
 

@@ -30,6 +30,10 @@ pub enum TolstoyError {
     #[fail(display = "Received bad response from the server: {}", _0)]
     BadServerResponse(String),
 
+    // TODO expand this into concrete error types
+    #[fail(display = "Received bad server state: {}", _0)]
+    BadServerState(String),
+
     #[fail(display = "encountered more than one metadata value for key: {}", _0)]
     DuplicateMetadata(String),
 
@@ -41,6 +45,9 @@ pub enum TolstoyError {
 
     #[fail(display = "encountered unexpected state: {}", _0)]
     UnexpectedState(String),
+
+    #[fail(display = "incompatible remote bootstrap schema. local: {}, remote: {}", _0, _1)]
+    IncompatibleBootstrapSchema(i64, i64),
 
     #[fail(display = "not yet implemented: {}", _0)]
     NotYetImplemented(String),
