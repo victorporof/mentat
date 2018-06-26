@@ -44,7 +44,7 @@ use syncer::{
     d,
 };
 
-use tx_processor::{
+use types::{
     Tx,
     TxPart,
 };

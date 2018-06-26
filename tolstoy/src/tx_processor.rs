@@ -11,12 +11,6 @@ use std::iter::Peekable;
 
 use rusqlite;
 
-use uuid::Uuid;
-
-use errors::{
-    Result,
-};
-
 use mentat_db::{
     TypedSQLValue,
 };
@@ -26,21 +20,13 @@ use mentat_core::{
     TypedValue,
 };
 
-#[derive(Debug,Clone,Serialize,Deserialize)]
-pub struct TxPart {
-    pub e: Entid,
-    pub a: Entid,
-    pub v: TypedValue,
-    pub tx: Entid,
-    pub added: bool,
-}
 
-// For returning out of the downloader as an ordered list.
-#[derive(Debug)]
-pub struct Tx {
-    pub tx: Uuid,
-    pub parts: Vec<TxPart>,
-}
+use errors::{
+    Result,
+};
+use types::{
+    TxPart,
+};
 
 pub trait TxReceiver {
     fn tx<T>(&mut self, tx_id: Entid, d: &mut T) -> Result<()>

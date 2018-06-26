@@ -13,28 +13,34 @@ use std::collections::HashMap;
 use rusqlite;
 use uuid::Uuid;
 
-use mentat_core::Entid;
-use metadata::SyncMetadataClient;
-use metadata::HeadTrackable;
-use schema::ensure_current_version;
-
+use mentat_core::{
+    Entid,
+};
+use metadata::{
+    HeadTrackable,
+    SyncMetadataClient,
+};
 use errors::{
     TolstoyError,
     Result,
 };
-
 use remote_client::{
     RemoteClient,
 };
-
+use schema::{
+    ensure_current_version,
+};
 use tx_processor::{
     Processor,
-    Tx,
     TxReceiver,
+};
+use tx_mapper::{
+    TxMapper,
+};
+use types::{
+    Tx,
     TxPart,
 };
-
-use tx_mapper::TxMapper;
 
 // TODO it would be nice to be able to pass
 // in a logger into Syncer::flow; would allow for a "debug mode"

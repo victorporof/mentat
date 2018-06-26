@@ -17,16 +17,18 @@ use std::collections::BTreeMap;
 use mentat::conn::Conn;
 
 use mentat::new_connection;
-use mentat_tolstoy::tx_processor::{
-    Processor,
-    TxReceiver,
-    TxPart,
-};
-use mentat_tolstoy::errors::Result;
 use mentat_core::{
     Entid,
     TypedValue,
     ValueType,
+};
+use mentat_tolstoy::errors::Result;
+use mentat_tolstoy::tx_processor::{
+    Processor,
+    TxReceiver,
+};
+use mentat_tolstoy::types::{
+    TxPart,
 };
 
 struct TxCountingReceiver {
