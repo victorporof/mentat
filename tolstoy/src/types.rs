@@ -24,6 +24,9 @@ pub struct Tx {
 
 #[derive(Debug,Clone,Serialize,Deserialize)]
 pub struct TxPart {
+    // TODO this is a temporary for development. Only first TxPart in a chunk series should have a non-None 'parts'.
+    // 'parts' should actually live in a transaction, but we do this now to avoid changing the server until dust settles.
+    pub parts: Option<PartitionMap>,
     pub e: Entid,
     pub a: Entid,
     pub v: TypedValue,

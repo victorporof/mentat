@@ -18,6 +18,7 @@ use mentat_core::{
 };
 use mentat_db::{
     CORE_SCHEMA_VERSION,
+    USER0,
 };
 use bootstrap::{
     BootstrapHelper,
@@ -34,6 +35,7 @@ use remote_client::{
 };
 use schema::{
     ensure_current_version,
+    PARTITION_USER,
 };
 use tx_processor::{
     Processor,
@@ -43,6 +45,8 @@ use tx_mapper::{
     TxMapper,
 };
 use types::{
+    Partition,
+    PartitionMap,
     Tx,
     TxPart,
 };
@@ -143,8 +147,27 @@ impl<'c> TxReceiver for UploadingTxReceiver<'c> {
 
         // TODO separate bits of network work should be combined into single 'future'
 
+        let mut datoms: Vec<TxPart> = datoms.collect();
+
+        // Figure our the "high water-mark" for the user partition.
+        let mut largest_e = USER0;
+        for datom in &datoms {
+            if datom.e > largest_e {
+                largest_e = datom.e;
+            }
+        }
+
+        // Annotate first datom in the series with the user partition information.
+        // TODO this is obviously wrong - we want to read partition info without
+        // reading/fetching any of the chunks (assertions/retractions)!
+        // Partition annotation will move over to Transaction once server support is in place,
+        // so this is temporary and for development purposes only.
+        let mut tx_partition_map = PartitionMap::default();
+        tx_partition_map.insert(PARTITION_USER.to_string(), Partition::new(USER0, largest_e + 1));
+        datoms[0].parts = Some(tx_partition_map);
+
         // Upload all chunks.
-        for datom in datoms {
+        for datom in &datoms {
             let datom_uuid = Uuid::new_v4();
             tx_chunks.push(datom_uuid);
             d(&format!("putting chunk: {:?}, {:?}", &datom_uuid, &datom));
