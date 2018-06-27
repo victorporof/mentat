@@ -9,16 +9,24 @@
 // specific language governing permissions and limitations under the License.
 
 use rusqlite;
+
+use mentat_db::USER0;
+
 use errors::Result;
 
+
 pub static REMOTE_HEAD_KEY: &str = r"remote_head";
+pub static PARTITION_USER: &str = r":db.part/user";
 
 lazy_static! {
     /// SQL statements to be executed, in order, to create the Tolstoy SQL schema (version 1).
+    /// "tolstoy_parts" records what the partitions were at the end of last sync, and is used
+    /// as a "root partition" during renumbering (a three-way merge of partitions).
     #[cfg_attr(rustfmt, rustfmt_skip)]
     static ref SCHEMA_STATEMENTS: Vec<&'static str> = { vec![
         "CREATE TABLE IF NOT EXISTS tolstoy_tu (tx INTEGER PRIMARY KEY, uuid BLOB NOT NULL UNIQUE) WITHOUT ROWID",
         "CREATE TABLE IF NOT EXISTS tolstoy_metadata (key BLOB NOT NULL UNIQUE, value BLOB NOT NULL)",
+        "CREATE TABLE IF NOT EXISTS tolstoy_parts (part TEXT NOT NULL PRIMARY KEY, start INTEGER NOT NULL, idx INTEGER NOT NULL)",
         "CREATE INDEX IF NOT EXISTS idx_tolstoy_tu_ut ON tolstoy_tu (uuid, tx)",
         ]
     };
@@ -29,6 +37,12 @@ pub fn ensure_current_version(tx: &mut rusqlite::Transaction) -> Result<()> {
         tx.execute(statement, &[])?;
     }
 
+    // Initial partition information is what we'd see at bootstrap, and is used during first sync.
+    // For now, only information about the user partition is tracked.
+    // We rely on the transactor to advance the tx partition.
+    // Support for migrating the db partition forward (that is, bootstrap schema) is TBD.
+    tx.execute("INSERT OR IGNORE INTO tolstoy_parts VALUES (?, ?, ?)", &[&PARTITION_USER, &USER0, &USER0])?;
+
     tx.execute("INSERT OR IGNORE INTO tolstoy_metadata (key, value) VALUES (?, zeroblob(16))", &[&REMOTE_HEAD_KEY])?;
     Ok(())
 }
@@ -37,6 +51,8 @@ pub fn ensure_current_version(tx: &mut rusqlite::Transaction) -> Result<()> {
 pub mod tests {
     use super::*;
     use uuid::Uuid;
+
+    use metadata::SyncMetadataClient;
 
     pub fn setup_conn_bare() -> rusqlite::Connection {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
@@ -80,6 +96,14 @@ pub mod tests {
             },
             (_, _) => { panic!("Wrong number of results."); },
         }
+
+        let partitions = SyncMetadataClient::get_partitions(&tx).unwrap();
+
+        assert_eq!(partitions.len(), 1);
+
+        let user_partition = partitions.get(PARTITION_USER).unwrap();
+        assert_eq!(user_partition.start, USER0);
+        assert_eq!(user_partition.index, USER0);
     }
 
     #[test]
@@ -96,6 +120,12 @@ pub mod tests {
                 Err(e) => panic!("Error running an update: {}", e),
                 _ => ()
             }
+        }
+
+        let new_idx = USER0 + 1;
+        match tx.execute("UPDATE tolstoy_parts SET idx = ? WHERE part = ?", &[&new_idx, &PARTITION_USER]) {
+            Err(e) => panic!("Error running an update: {}", e),
+            _ => ()
         }
 
         assert!(ensure_current_version(&mut tx).is_ok());
@@ -115,5 +145,13 @@ pub mod tests {
             },
             (_, _) => { panic!("Wrong number of results."); },
         }
+
+        let partitions = SyncMetadataClient::get_partitions(&tx).unwrap();
+
+        assert_eq!(partitions.len(), 1);
+
+        let user_partition = partitions.get(PARTITION_USER).unwrap();
+        assert_eq!(user_partition.start, USER0);
+        assert_eq!(user_partition.index, new_idx);
     }
 }

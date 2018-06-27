@@ -19,6 +19,11 @@ use errors::{
     Result,
 };
 
+use mentat_db::{
+    Partition,
+    PartitionMap,
+};
+
 pub struct SyncMetadataClient {}
 
 impl SyncMetadataClient {
@@ -40,6 +45,14 @@ impl SyncMetadataClient {
             bail!(TolstoyError::DuplicateMetadata(schema::REMOTE_HEAD_KEY.into()));
         }
         Ok(())
+    }
+
+    pub fn get_partitions(tx: &rusqlite::Transaction) -> Result<PartitionMap> {
+        let mut stmt: ::rusqlite::Statement = tx.prepare("SELECT part, start, idx FROM tolstoy_parts")?;
+        let m: Result<PartitionMap> = stmt.query_and_then(&[], |row| -> Result<(String, Partition)> {
+            Ok((row.get_checked(0)?, Partition::new(row.get_checked(1)?, row.get_checked(2)?)))
+        })?.collect();
+        m
     }
 }
 
