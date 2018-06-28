@@ -42,7 +42,7 @@ use types::{
 ///
 /// If successful, returns a new `DB` that reflects the new (local) partition map and the new
 /// (local) schema after renumbering.
-fn renumber(conn: &rusqlite::Connection, root: &PartitionMap, local: &PartitionMap, remote: &PartitionMap) -> Result<DB> {
+pub fn renumber(conn: &rusqlite::Transaction, root: &PartitionMap, local: &PartitionMap, remote: &PartitionMap) -> Result<DB> {
     // For each partition present in both local and remote, that has advanced locally since remote,
     // renumber local entities.
     // Take each partition's largest value from either local or remote, if only one has advanced.
@@ -186,7 +186,7 @@ mod tests {
         assert_eq!(local.schema, remote.schema);
 
         // N.b., after renumbering, the on-disk data is not reflected in the `TestConn`!
-        let mut db = renumber(&local.sqlite,
+        let mut db = renumber(&local.sqlite.transaction().unwrap(),
                               &local.partition_map,
                               &local.partition_map,
                               &remote.partition_map).expect("to renumber");
@@ -220,7 +220,7 @@ mod tests {
                            [:db/add 104 :db.schema/version 2]]"#).expect("transact remote 2");
 
         // N.b., after renumbering, the on-disk data is not reflected in the `TestConn`!
-        let mut db = renumber(&local.sqlite,
+        let mut db = renumber(&local.sqlite.transaction().unwrap(),
                               &local.partition_map,
                               &local.partition_map,
                               &remote.partition_map).expect("to renumber");
@@ -254,10 +254,10 @@ mod tests {
                             [:db/add 104 :db.schema/version 2]]"#).expect("transact remote 2");
 
         // N.b., after renumbering, the on-disk data is not reflected in the `TestConn`!
-        let mut db = renumber(&local.sqlite,
-                              &local.partition_map,
-                              &local.partition_map,
-                              &remote.partition_map).expect("to renumber");
+        let mut db = renumber(&local.sqlite.transaction().unwrap(),
+                            &local.partition_map,
+                            &local.partition_map,
+                            &remote.partition_map).expect("to renumber");
 
         // To allow tests to reference "allocated" entids freely, `TestConn` creates a fake
         // partition that doesn't make it to disk.  Add it to what does make it to disk.
@@ -300,10 +300,16 @@ mod tests {
                             [268435458 :db/txInstant ?ms 268435458 true]]"#);
 
         // N.b., after renumbering, the on-disk data is not reflected in the `TestConn`!
-        let mut db = renumber(&local.sqlite,
+        let mut db;
+        {
+        let t = local.sqlite.transaction().unwrap();
+        db = renumber(&t,
                               &root,
                               &local.partition_map,
                               &remote.partition_map).expect("to renumber");
+        // TODO write why
+        t.commit().expect("to commit renumber")
+        }
 
         // To allow tests to reference "allocated" entids freely, `TestConn` creates a fake
         // partition that doesn't make it to disk.  Add it to what does make it to disk.
