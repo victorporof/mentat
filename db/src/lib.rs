@@ -71,6 +71,8 @@ pub use bootstrap::{
     CORE_SCHEMA_VERSION,
 };
 
+pub use renumber::renumber;
+
 use edn::symbols;
 
 pub use entids::{
@@ -106,6 +108,7 @@ pub use tx_observer::{
 pub use types::{
     AttributeSet,
     DB,
+    Partition,
     PartitionMap,
     TransactableValue,
 };

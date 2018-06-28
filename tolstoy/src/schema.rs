@@ -97,7 +97,7 @@ pub mod tests {
             (_, _) => { panic!("Wrong number of results."); },
         }
 
-        let partitions = SyncMetadataClient::get_partitions(&tx).unwrap();
+        let partitions = SyncMetadataClient::get_partitions(&tx, false).unwrap();
 
         assert_eq!(partitions.len(), 1);
 
@@ -146,7 +146,7 @@ pub mod tests {
             (_, _) => { panic!("Wrong number of results."); },
         }
 
-        let partitions = SyncMetadataClient::get_partitions(&tx).unwrap();
+        let partitions = SyncMetadataClient::get_partitions(&tx, false).unwrap();
 
         assert_eq!(partitions.len(), 1);
 

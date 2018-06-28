@@ -95,7 +95,7 @@ where T: Sized + Iterator<Item=Result<TxPart>> + 't {
                 Err(_) => None,
                 Ok(datom) => {
                     Some(TxPart {
-                        parts: None,
+                        partitions: None,
                         e: datom.e,
                         a: datom.a,
                         v: datom.v.clone(),
@@ -113,7 +113,7 @@ where T: Sized + Iterator<Item=Result<TxPart>> + 't {
 
 fn to_tx_part(row: &rusqlite::Row) -> Result<TxPart> {
     Ok(TxPart {
-        parts: None,
+        partitions: None,
         e: row.get_checked(0)?,
         a: row.get_checked(1)?,
         v: TypedValue::from_sql_value_pair(row.get_checked(2)?, row.get_checked(3)?)?,

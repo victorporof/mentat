@@ -22,16 +22,11 @@ use errors::{
 };
 
 use mentat_core::{
-    Entid,
     KnownEntid,
 };
 use mentat_db::{
-    USER0,
-    TX0,
-};
-use mentat_db::db;
-use mentat_db::db::{
-    PartitionMapping,
+    renumber,
+    PartitionMap,
 };
 
 use entity_builder::{
@@ -52,11 +47,7 @@ pub trait Syncable {
     fn sync(&mut self, server_uri: &String, user_uuid: &String) -> Result<()>;
 }
 
-fn within_user_partition(entid: Entid) -> bool {
-    entid >= USER0 && entid < TX0
-}
-
-fn fast_forward_local<'a, 'c>(in_progress: &mut InProgress<'a, 'c>, txs: Vec<Tx>) -> Result<()> {
+fn fast_forward_local<'a, 'c>(in_progress: &mut InProgress<'a, 'c>, txs: Vec<Tx>) -> Result<Option<PartitionMap>> {
     let mut last_tx = None;
 
     // During fast-forwarding, we will insert datoms with known entids
@@ -69,20 +60,21 @@ fn fast_forward_local<'a, 'c>(in_progress: &mut InProgress<'a, 'c>, txs: Vec<Tx>
     // In absence of excision and implementation bugs, this should work
     // just as if we counted number of incoming entids and expanded by
     // that number instead.
-    let mut largest_entid_encountered = USER0;
+    let mut last_encountered_partition_map = None;
 
     for tx in txs {
         let mut builder = TermBuilder::new();
+
+        last_encountered_partition_map = match tx.parts[0].partitions.clone() {
+            Some(parts) => Some(parts),
+            None => bail!(TolstoyError::BadServerState("Missing partition map in incoming transaction".to_string()))
+        };
 
         for part in tx.parts {
             if part.added {
                 builder.add(KnownEntid(part.e), KnownEntid(part.a), part.v)?;
             } else {
                 builder.retract(KnownEntid(part.e), KnownEntid(part.a), part.v)?;
-            }
-            // Ignore datoms that fall outside of the user partition:
-            if within_user_partition(part.e) && part.e > largest_entid_encountered {
-                largest_entid_encountered = part.e;
             }
         }
 
@@ -96,15 +88,9 @@ fn fast_forward_local<'a, 'c>(in_progress: &mut InProgress<'a, 'c>, txs: Vec<Tx>
     if let Some((entid, uuid)) = last_tx {
         SyncMetadataClient::set_remote_head(&mut in_progress.transaction, &uuid)?;
         TxMapper::set_tx_uuid(&mut in_progress.transaction, entid, &uuid)?;
-
-        // We only need to advance the user partition, since we're using KnownEntid and partition
-        // won't get auto-updated; shouldn't be a problem for tx partition, since we're relying on
-        // the builder to create a tx and advance the partition for us.
-        in_progress.partition_map.expand_up_to(":db.part/user", largest_entid_encountered);
-        db::update_partition_map(&mut in_progress.transaction, &in_progress.partition_map)?;
     }
 
-    Ok(())
+    Ok(last_encountered_partition_map)
 }
 
 impl Conn {
@@ -118,6 +104,7 @@ impl Conn {
         let mut in_progress = self.begin_transaction(sqlite)?;
 
         let sync_result = Syncer::flow(&mut in_progress.transaction, server_uri, &uuid)?;
+        let mut incoming_partition = None;
 
         match sync_result {
             SyncResult::EmptyServer => (),
@@ -126,7 +113,10 @@ impl Conn {
             SyncResult::Merge => bail!(TolstoyError::NotYetImplemented(
                 format!("Can't sync against diverged local.")
             )),
-            SyncResult::LocalFastForward(txs) => fast_forward_local(&mut in_progress, txs)?,
+            SyncResult::LocalFastForward(txs) => {
+                incoming_partition = fast_forward_local(&mut in_progress, txs)?;
+                ()
+            },
             SyncResult::BadServerState => bail!(TolstoyError::NotYetImplemented(
                 format!("Bad server state.")
             )),
@@ -134,6 +124,17 @@ impl Conn {
             SyncResult::IncompatibleBootstrapSchema => bail!(TolstoyError::NotYetImplemented(
                 format!("IncompatibleBootstrapSchema.")
             )),
+        }
+
+        match incoming_partition {
+            Some(incoming) => {
+                let root = SyncMetadataClient::get_partitions(&in_progress.transaction, true)?;
+                let current = SyncMetadataClient::get_partitions(&in_progress.transaction, false)?;
+                let updated_db = renumber(&in_progress.transaction, &root, &current, &incoming)?;
+                in_progress.partition_map = updated_db.partition_map;
+                ()
+            },
+            None => ()
         }
 
         in_progress.commit()

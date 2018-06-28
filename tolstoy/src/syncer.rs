@@ -19,6 +19,9 @@ use mentat_core::{
 use mentat_db::{
     CORE_SCHEMA_VERSION,
     USER0,
+    TX0,
+    Partition,
+    PartitionMap,
 };
 use bootstrap::{
     BootstrapHelper,
@@ -45,8 +48,6 @@ use tx_mapper::{
     TxMapper,
 };
 use types::{
-    Partition,
-    PartitionMap,
     Tx,
     TxPart,
 };
@@ -74,43 +75,6 @@ pub fn d(message: &str) {
 
 pub struct Syncer {}
 
-// TODO this is sub-optimal, we don't need to walk the table
-// to query the last thing in it w/ an index on tx!!
-// but it's the hammer at hand!
-// See https://github.com/mozilla/mentat/issues/572
-struct InquiringTxReceiver {
-    pub first_tx: Option<Entid>,
-    pub last_tx: Option<Entid>,
-    pub is_done: bool,
-}
-
-impl InquiringTxReceiver {
-    fn new() -> InquiringTxReceiver {
-        InquiringTxReceiver {
-            first_tx: None,
-            last_tx: None,
-            is_done: false,
-        }
-    }
-}
-
-impl TxReceiver for InquiringTxReceiver {
-    fn tx<T>(&mut self, tx_id: Entid, _datoms: &mut T) -> Result<()>
-    where T: Iterator<Item=TxPart> {
-        match self.first_tx {
-            None => self.first_tx = Some(tx_id),
-            Some(_) => ()
-        }
-        self.last_tx = Some(tx_id);
-        Ok(())
-    }
-
-    fn done(&mut self) -> Result<()> {
-        self.is_done = true;
-        Ok(())
-    }
-}
-
 struct UploadingTxReceiver<'c> {
     pub tx_temp_uuids: HashMap<Entid, Uuid>,
     pub is_done: bool,
@@ -129,6 +93,11 @@ impl<'c> UploadingTxReceiver<'c> {
             is_done: false
         }
     }
+}
+
+/// Assumes that user partition's upper bound is the start of the tx partition.
+fn within_user_partition(e: Entid) -> bool {
+    e >= USER0 && e < TX0
 }
 
 impl<'c> TxReceiver for UploadingTxReceiver<'c> {
@@ -151,9 +120,11 @@ impl<'c> TxReceiver for UploadingTxReceiver<'c> {
 
         // Figure our the "high water-mark" for the user partition.
         let mut largest_e = USER0;
+        let mut es_within_user_partition = false;
         for datom in &datoms {
-            if datom.e > largest_e {
+            if within_user_partition(datom.e) && datom.e > largest_e {
                 largest_e = datom.e;
+                es_within_user_partition = true;
             }
         }
 
@@ -163,8 +134,13 @@ impl<'c> TxReceiver for UploadingTxReceiver<'c> {
         // Partition annotation will move over to Transaction once server support is in place,
         // so this is temporary and for development purposes only.
         let mut tx_partition_map = PartitionMap::default();
-        tx_partition_map.insert(PARTITION_USER.to_string(), Partition::new(USER0, largest_e + 1));
-        datoms[0].parts = Some(tx_partition_map);
+        let new_index = if es_within_user_partition {
+            largest_e + 1
+        } else {
+            largest_e
+        };
+        tx_partition_map.insert(PARTITION_USER.to_string(), Partition::new(USER0, new_index));
+        datoms[0].partitions = Some(tx_partition_map);
 
         // Upload all chunks.
         for datom in &datoms {
@@ -260,26 +236,11 @@ impl Syncer {
         // never been synced successfully.
         // In other words: if latest tx isn't mapped, then HEAD moved
         // since last sync and server needs to be updated.
-        let mut inquiring_tx_receiver = InquiringTxReceiver::new();
-        // TODO we really just care about our first tx (bootstrap) and our HEAD.
-        // we don't need to walk 'transactions' to figure this out!
-        Processor::process(db_tx, None, &mut inquiring_tx_receiver)?;
-        if !inquiring_tx_receiver.is_done {
-            bail!(TolstoyError::TxProcessorUnfinished);
-        }
-        let (have_local_changes, local_store_empty) = match inquiring_tx_receiver.last_tx {
-            Some(tx) => {
-                match TxMapper::get(db_tx, tx)? {
-                    Some(_) => (false, false),
-                    None => (true, false)
-                }
-            },
-            None => (false, true)
-        };
-        let local_bootstrap_tx = match inquiring_tx_receiver.first_tx {
-            Some(tx) => tx,
-            None => bail!(TolstoyError::UnexpectedState("Missing local bootstrap transaction.".to_string()))
-        };
+        let (local_bootstrap_tx, local_head_tx) = SyncMetadataClient::root_and_head_tx(db_tx)?;
+        // Empty means we just have a bootstrap transaction.
+        let local_store_empty = local_bootstrap_tx == local_head_tx;
+        // We "have changes" if there is a non-bootstrap transaction that hasn't been mapped.
+        let have_local_changes = !local_store_empty && TxMapper::get(db_tx, local_head_tx)?.is_none();
 
         // Server is empty - populate it.
         if remote_head == Uuid::nil() {
@@ -298,10 +259,6 @@ impl Syncer {
                 bail!(TolstoyError::BadServerState("Server specified non-root HEAD but gave no transactions".to_string()));
             }
 
-            if incoming_txs.len() > 1 {
-                bail!(TolstoyError::NotYetImplemented("Can't purge local state: local excision not supported yet".to_string()));
-            }
-
             // We assume that the first transaction encountered on first sync is the bootstrap transaction.
             let bootstrap_tx = &incoming_txs[0];
             let remote_bootstrap = BootstrapHelper::new(bootstrap_tx);
@@ -317,7 +274,11 @@ impl Syncer {
             SyncMetadataClient::set_remote_head(db_tx, &bootstrap_tx.tx)?;
             TxMapper::set_tx_uuid(db_tx, local_bootstrap_tx, &bootstrap_tx.tx)?;
 
-            return Ok(SyncResult::AdoptedRemoteOnFirstSync);
+            if incoming_txs.len() > 1 && !local_store_empty {
+                bail!(TolstoyError::NotYetImplemented("Can't purge local state: local excision not supported yet".to_string()));
+            }
+
+            return Ok(SyncResult::LocalFastForward(incoming_txs[1 ..].to_vec()));
 
         // Server did not change since we last talked to it.
         } else if locally_known_remote_head == remote_head {
