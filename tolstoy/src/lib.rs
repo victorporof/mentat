@@ -49,6 +49,8 @@ pub use syncer::{
     Syncer,
     SyncResult,
 };
+mod tx_uploader;
+mod logger;
 pub mod tx_mapper;
 pub use tx_mapper::{
     TxMapper,

@@ -39,10 +39,7 @@ use errors::{
     Result,
 };
 
-use syncer::{
-    // TODO: use `log` crate.
-    d,
-};
+use logger::d;
 
 use types::{
     Tx,
