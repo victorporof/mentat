@@ -162,7 +162,7 @@ const FALSE: &'static bool = &false;
 ///
 /// `rusqlite` is designed around references to values; this lets us use computed bools easily.
 #[inline(always)]
-fn to_bool_ref(x: bool) -> &'static bool {
+pub(crate) fn to_bool_ref(x: bool) -> &'static bool {
     if x { TRUE } else { FALSE }
 }
 
@@ -196,7 +196,7 @@ lazy_static! {
         // differentiate, e.g., keywords and strings.
         r#"CREATE UNIQUE INDEX idx_datoms_unique_value ON datoms (a, value_type_tag, v) WHERE unique_value IS NOT 0"#,
 
-        r#"CREATE TABLE transactions (e INTEGER NOT NULL, a SMALLINT NOT NULL, v BLOB NOT NULL, tx INTEGER NOT NULL, added TINYINT NOT NULL DEFAULT 1, value_type_tag SMALLINT NOT NULL)"#,
+        r#"CREATE TABLE transactions (e INTEGER NOT NULL, a SMALLINT NOT NULL, v BLOB NOT NULL, tx INTEGER NOT NULL, added TINYINT NOT NULL DEFAULT 1, value_type_tag SMALLINT NOT NULL, timeline TINYINT NOT NULL DEFAULT 0)"#,
         r#"CREATE INDEX idx_transactions_tx ON transactions (tx, added)"#,
 
         // Fulltext indexing.
@@ -2794,5 +2794,84 @@ pub(crate) mod tests {
         let sqlite = new_connection_with_key("", "hunter2").expect("Failed to create encrypted connection");
         // Run a basic test as a sanity check.
         run_test_add(TestConn::with_sqlite(sqlite));
+    }
+
+    #[test]
+    fn test_rewind() {
+        let mut conn = TestConn::default();
+
+        assert_transact!(conn, r#"[
+            {:db/id 200 :db/ident :test/one :db/valueType :db.type/long :db/cardinality :db.cardinality/one}
+            {:db/id 201 :db/ident :test/many :db/valueType :db.type/long :db/cardinality :db.cardinality/many}
+        ]"#);
+
+        let first = "[
+            [200 :db/ident :test/one]
+            [200 :db/valueType :db.type/long]
+            [200 :db/cardinality :db.cardinality/one]
+            [201 :db/ident :test/many]
+            [201 :db/valueType :db.type/long]
+            [201 :db/cardinality :db.cardinality/many]
+        ]";
+        assert_matches!(conn.datoms(), first);
+
+        let tx_report1 = assert_transact!(conn, r#"[
+            [:db/add 300 :test/one 1]
+            [:db/add 300 :test/many 2]
+            [:db/add 300 :test/many 3]
+        ]"#);
+
+        assert_matches!(conn.last_transaction(),
+                        "[[300 :test/one 1 ?tx true]
+                          [300 :test/many 2 ?tx true]
+                          [300 :test/many 3 ?tx true]
+                          [?tx :db/txInstant ?ms ?tx true]]");
+
+        let second = "[
+            [200 :db/ident :test/one]
+            [200 :db/valueType :db.type/long]
+            [200 :db/cardinality :db.cardinality/one]
+            [201 :db/ident :test/many]
+            [201 :db/valueType :db.type/long]
+            [201 :db/cardinality :db.cardinality/many]
+            [300 :test/one 1]
+            [300 :test/many 2]
+            [300 :test/many 3]
+        ]";
+        assert_matches!(conn.datoms(), second);
+
+        let tx_report2 = assert_transact!(conn, r#"[
+            [:db/add 300 :test/one 2]
+            [:db/add 300 :test/many 2]
+            [:db/retract 300 :test/many 3]
+            [:db/add 300 :test/many 4]
+        ]"#);
+
+        assert_matches!(conn.last_transaction(),
+                        "[[300 :test/one 1 ?tx false]
+                          [300 :test/one 2 ?tx true]
+                          [300 :test/many 3 ?tx false]
+                          [300 :test/many 4 ?tx true]
+                          [?tx :db/txInstant ?ms ?tx true]]");
+
+        let third = "[
+            [200 :db/ident :test/one]
+            [200 :db/valueType :db.type/long]
+            [200 :db/cardinality :db.cardinality/one]
+            [201 :db/ident :test/many]
+            [201 :db/valueType :db.type/long]
+            [201 :db/cardinality :db.cardinality/many]
+            [300 :test/one 2]
+            [300 :test/many 2]
+            [300 :test/many 4]
+        ]";
+        assert_matches!(conn.datoms(), third);
+
+        use rewind;
+        rewind::rewind_transaction(&conn.sqlite, tx_report2.tx_id).expect("rewind_transaction");
+        assert_matches!(conn.datoms(), second);
+
+        rewind::rewind_transaction(&conn.sqlite, tx_report1.tx_id).expect("rewind_transaction");
+        assert_matches!(conn.datoms(), first);
     }
 }

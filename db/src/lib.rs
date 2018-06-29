@@ -48,6 +48,7 @@ pub mod entids;
 pub mod internal_types;    // pub because we need them for building entities programmatically.
 mod metadata;
 mod renumber;
+mod rewind;
 mod schema;
 pub mod tx_observer;
 mod watcher;
