@@ -39,6 +39,7 @@ pub use errors::{
 pub mod bootstrap;
 pub mod metadata;
 pub use metadata::{
+    PartitionsTable,
     SyncMetadataClient,
 };
 mod parts;

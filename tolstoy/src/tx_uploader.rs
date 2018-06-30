@@ -17,18 +17,12 @@ use mentat_core::{
 };
 
 use mentat_db::{
-    USER0,
-    TX0,
-    Partition,
     PartitionMap,
+    V1_PARTS,
 };
 
 use errors::{
     Result,
-};
-
-use schema::{
-    PARTITION_USER,
 };
 
 use remote_client::{
@@ -51,23 +45,47 @@ pub(crate) struct TxUploader<'c> {
     remote_client: &'c RemoteClient,
     remote_head: &'c Uuid,
     pub rolling_temp_head: Option<Uuid>,
+    local_partitions: PartitionMap,
 }
 
 impl<'c> TxUploader<'c> {
-    pub fn new(client: &'c RemoteClient, remote_head: &'c Uuid) -> TxUploader<'c> {
+    pub fn new(client: &'c RemoteClient, remote_head: &'c Uuid, local_partitions: PartitionMap) -> TxUploader<'c> {
         TxUploader {
             tx_temp_uuids: HashMap::new(),
             remote_client: client,
             remote_head: remote_head,
             rolling_temp_head: None,
-            is_done: false
+            is_done: false,
+            local_partitions: local_partitions
         }
     }
 }
 
-/// Assumes that user partition's upper bound is the start of the tx partition.
-fn within_user_partition(e: Entid) -> bool {
-    e >= USER0 && e < TX0
+/// Given a set of entids and a partition map, returns a new PartitionMap that would result from
+/// expanding the partitions to fit the entids.
+fn allocate_partition_map_for_entids<T>(entids: T, local_partitions: &PartitionMap) -> PartitionMap
+where T: Iterator<Item=Entid> {
+    let mut parts = HashMap::new();
+    for name in V1_PARTS.iter().map(|&(ref part, ..)| part.to_string()) {
+        // This shouldn't fail: locally-sourced partitions must be present within with V1_PARTS.
+        let p = local_partitions.get(&name).unwrap();
+        parts.insert(name, (p, p.clone()));
+    }
+
+    // For a given partition, set its index to one greater than the largest encountered entid within its partition space.
+    for entid in entids {
+        for (p, new_p) in parts.values_mut() {
+            if p.allows_entid(entid) && entid >= new_p.index {
+                new_p.index = entid + 1;
+            }
+        }
+    }
+
+    let mut m = PartitionMap::default();
+    for (name, (_, new_p)) in parts {
+        m.insert(name, new_p);
+    }
+    m
 }
 
 impl<'c> TxReceiver for TxUploader<'c> {
@@ -88,29 +106,9 @@ impl<'c> TxReceiver for TxUploader<'c> {
 
         let mut datoms: Vec<TxPart> = datoms.collect();
 
-        // Figure our the "high water-mark" for the user partition.
-        let mut largest_e = USER0;
-        let mut es_within_user_partition = false;
-        for datom in &datoms {
-            if within_user_partition(datom.e) && datom.e > largest_e {
-                largest_e = datom.e;
-                es_within_user_partition = true;
-            }
-        }
-
-        // Annotate first datom in the series with the user partition information.
-        // TODO this is obviously wrong - we want to read partition info without
-        // reading/fetching any of the chunks (assertions/retractions)!
-        // Partition annotation will move over to Transaction once server support is in place,
-        // so this is temporary and for development purposes only.
-        let mut tx_partition_map = PartitionMap::default();
-        let new_index = if es_within_user_partition {
-            largest_e + 1
-        } else {
-            largest_e
-        };
-        tx_partition_map.insert(PARTITION_USER.to_string(), Partition::new(USER0, new_index));
-        datoms[0].partitions = Some(tx_partition_map);
+        // TODO this should live within a transaction, once server support is in place.
+        // For now, we're uploading the PartitionMap in transaction's first chunk.
+        datoms[0].partitions = Some(allocate_partition_map_for_entids(datoms.iter().map(|d| d.e), &self.local_partitions));
 
         // Upload all chunks.
         for datom in &datoms {
@@ -129,17 +127,12 @@ impl<'c> TxReceiver for TxUploader<'c> {
         // Depending on how much we're uploading, and how unreliable our connection
         // is, this might be a good thing to do to ensure we make at least some progress.
         // Comes at a cost of possibly increasing racing against other clients.
-        match self.rolling_temp_head {
-            Some(parent) => {
-                d(&format!("putting transaction: {:?}, {:?}, {:?}", &tx_uuid, &parent, &tx_chunks));
-                self.remote_client.put_transaction(&tx_uuid, &parent, &tx_chunks)?;
-                
-            },
-            None => {
-                d(&format!("putting transaction: {:?}, {:?}, {:?}", &tx_uuid, &self.remote_head, &tx_chunks));
-                self.remote_client.put_transaction(&tx_uuid, self.remote_head, &tx_chunks)?;
-            }
-        }
+        let tx_parent = match self.rolling_temp_head {
+            Some(p) => p,
+            None => *self.remote_head,
+        };
+        d(&format!("putting transaction: {:?}, {:?}, {:?}", &tx_uuid, &tx_parent, &tx_chunks));
+        self.remote_client.put_transaction(&tx_uuid, &tx_parent, &tx_chunks)?;
 
         d(&format!("updating rolling head: {:?}", tx_uuid));
         self.rolling_temp_head = Some(tx_uuid.clone());
@@ -150,5 +143,76 @@ impl<'c> TxReceiver for TxUploader<'c> {
     fn done(&mut self) -> Result<()> {
         self.is_done = true;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+pub mod tests {
+    use super::*;
+
+    use mentat_db::{
+        Partition,
+        V1_PARTS,
+    };
+
+    use schema::{
+        PARTITION_USER,
+        PARTITION_TX,
+        PARTITION_DB,
+    };
+
+    fn bootstrap_partition_map() -> PartitionMap {
+        V1_PARTS.iter()
+            .map(|&(ref part, start, end, index)| (part.to_string(), Partition::new(start, end, index)))
+            .collect()
+    }
+
+    #[test]
+    fn test_allocate_partition_map_for_entids() {
+        let bootstrap_map = bootstrap_partition_map();
+
+        // Empty list of entids should not allocate any space in partitions.
+        let entids: Vec<Entid> = vec![];
+        let no_op_map = allocate_partition_map_for_entids(entids.into_iter(), &bootstrap_map);
+        assert_eq!(bootstrap_map, no_op_map);
+
+        // Only user partition.
+        let entids = vec![65536];
+        let new_map = allocate_partition_map_for_entids(entids.into_iter(), &bootstrap_map);
+        assert_eq!(65537, new_map.get(PARTITION_USER).unwrap().index);
+        // Other partitions are untouched.
+        assert_eq!(41, new_map.get(PARTITION_DB).unwrap().index);
+        assert_eq!(268435456, new_map.get(PARTITION_TX).unwrap().index);
+
+        // Only tx partition.
+        let entids = vec![268435666];
+        let new_map = allocate_partition_map_for_entids(entids.into_iter(), &bootstrap_map);
+        assert_eq!(268435667, new_map.get(PARTITION_TX).unwrap().index);
+        // Other partitions are untouched.
+        assert_eq!(65536, new_map.get(PARTITION_USER).unwrap().index);
+        assert_eq!(41, new_map.get(PARTITION_DB).unwrap().index);
+
+        // Only DB partition.
+        let entids = vec![41];
+        let new_map = allocate_partition_map_for_entids(entids.into_iter(), &bootstrap_map);
+        assert_eq!(42, new_map.get(PARTITION_DB).unwrap().index);
+        // Other partitions are untouched.
+        assert_eq!(65536, new_map.get(PARTITION_USER).unwrap().index);
+        assert_eq!(268435456, new_map.get(PARTITION_TX).unwrap().index);
+
+        // User and tx partitions.
+        let entids = vec![65537, 268435456];
+        let new_map = allocate_partition_map_for_entids(entids.into_iter(), &bootstrap_map);
+        assert_eq!(65538, new_map.get(PARTITION_USER).unwrap().index);
+        assert_eq!(268435457, new_map.get(PARTITION_TX).unwrap().index);
+        // DB partition is untouched.
+        assert_eq!(41, new_map.get(PARTITION_DB).unwrap().index);
+
+        // DB, user and tx partitions.
+        let entids = vec![41, 65666, 268435457];
+        let new_map = allocate_partition_map_for_entids(entids.into_iter(), &bootstrap_map);
+        assert_eq!(65667, new_map.get(PARTITION_USER).unwrap().index);
+        assert_eq!(268435458, new_map.get(PARTITION_TX).unwrap().index);
+        assert_eq!(42, new_map.get(PARTITION_DB).unwrap().index);
     }
 }

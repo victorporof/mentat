@@ -35,6 +35,7 @@ use entity_builder::{
 };
 
 use mentat_tolstoy::{
+    PartitionsTable,
     Syncer,
     SyncMetadataClient,
     SyncResult,
@@ -128,8 +129,8 @@ impl Conn {
 
         match incoming_partition {
             Some(incoming) => {
-                let root = SyncMetadataClient::get_partitions(&in_progress.transaction, true)?;
-                let current = SyncMetadataClient::get_partitions(&in_progress.transaction, false)?;
+                let root = SyncMetadataClient::get_partitions(&in_progress.transaction, PartitionsTable::Core)?;
+                let current = SyncMetadataClient::get_partitions(&in_progress.transaction, PartitionsTable::Tolstoy)?;
                 let updated_db = renumber(&in_progress.transaction, &root, &current, &incoming)?;
                 in_progress.partition_map = updated_db.partition_map;
                 ()

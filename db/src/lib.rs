@@ -61,6 +61,7 @@ mod upsert_resolution;
 pub use bootstrap::{
     TX0,
     USER0,
+    V1_PARTS,
 };
 
 pub use schema::{

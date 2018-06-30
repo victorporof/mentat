@@ -30,6 +30,11 @@ use mentat_db::{
 
 pub struct SyncMetadataClient {}
 
+pub enum PartitionsTable {
+    Core,
+    Tolstoy,
+}
+
 impl SyncMetadataClient {
     pub fn remote_head(tx: &rusqlite::Transaction) -> Result<Uuid> {
         tx.query_row(
@@ -52,14 +57,14 @@ impl SyncMetadataClient {
     }
 
     // TODO Functions below start to blur the line between mentat-proper and tolstoy...
-    pub fn get_partitions(tx: &rusqlite::Transaction, core: bool) -> Result<PartitionMap> {
-        let db_table = match core {
-            true => "parts",
-            false => "tolstoy_parts"
+    pub fn get_partitions(tx: &rusqlite::Transaction, parts_table: PartitionsTable) -> Result<PartitionMap> {
+        let db_table = match parts_table {
+            PartitionsTable::Core => "parts",
+            PartitionsTable::Tolstoy => "tolstoy_parts"
         };
-        let mut stmt: ::rusqlite::Statement = tx.prepare(&format!("SELECT part, start, idx FROM {}", db_table))?;
+        let mut stmt: ::rusqlite::Statement = tx.prepare(&format!("SELECT part, start, end, idx FROM {}", db_table))?;
         let m: Result<PartitionMap> = stmt.query_and_then(&[], |row| -> Result<(String, Partition)> {
-            Ok((row.get_checked(0)?, Partition::new(row.get_checked(1)?, row.get_checked(2)?)))
+            Ok((row.get_checked(0)?, Partition::new(row.get_checked(1)?, row.get_checked(2)?, row.get_checked(3)?)))
         })?.collect();
         m
     }

@@ -25,6 +25,7 @@ use errors::{
     Result,
 };
 use metadata::{
+    PartitionsTable,
     SyncMetadataClient,
 };
 use remote_client::{
@@ -61,7 +62,7 @@ pub enum SyncResult {
 
 impl Syncer {
     fn fast_forward_server(db_tx: &mut rusqlite::Transaction, from_tx: Option<Entid>, remote_client: &RemoteClient, remote_head: &Uuid) -> Result<()> {
-        let mut uploader = TxUploader::new(remote_client, remote_head);
+        let mut uploader = TxUploader::new(remote_client, remote_head, SyncMetadataClient::get_partitions(db_tx, PartitionsTable::Core)?);
         Processor::process(db_tx, from_tx, &mut uploader)?;
         if !uploader.is_done {
             bail!(TolstoyError::TxProcessorUnfinished);
