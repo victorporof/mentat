@@ -28,14 +28,30 @@ use mentat_db::{
     PartitionMap,
 };
 
-pub struct SyncMetadataClient {}
+// Could be Copy, but that might change
+pub struct SyncMetadata {
+    // Local head: latest transaction that we have in the store,
+    // but with one caveat: its tx might will not be mapped if it's
+    // never been synced successfully.
+    // In other words: if latest tx isn't mapped, then HEAD moved
+    // since last sync and server needs to be updated.
+    pub root: Entid,
+    pub head: Entid,
+}
 
 pub enum PartitionsTable {
     Core,
     Tolstoy,
 }
 
-impl SyncMetadataClient {
+impl SyncMetadata {
+    pub fn new(root: Entid, head: Entid) -> SyncMetadata {
+        SyncMetadata {
+            root: root,
+            head: head,
+        }
+    }
+
     pub fn remote_head(tx: &rusqlite::Transaction) -> Result<Uuid> {
         tx.query_row(
             "SELECT value FROM tolstoy_metadata WHERE key = ?",
@@ -99,7 +115,7 @@ mod tests {
     fn test_get_remote_head_default() {
         let mut conn = schema::tests::setup_conn_bare();
         let tx = schema::tests::setup_tx(&mut conn);
-        assert_eq!(Uuid::nil(), SyncMetadataClient::remote_head(&tx).expect("fetch succeeded"));
+        assert_eq!(Uuid::nil(), SyncMetadata::remote_head(&tx).expect("fetch succeeded"));
     }
 
     #[test]
@@ -107,8 +123,8 @@ mod tests {
         let mut conn = schema::tests::setup_conn_bare();
         let tx = schema::tests::setup_tx(&mut conn);
         let uuid = Uuid::new_v4();
-        SyncMetadataClient::set_remote_head(&tx, &uuid).expect("update succeeded");
-        assert_eq!(uuid, SyncMetadataClient::remote_head(&tx).expect("fetch succeeded"));
+        SyncMetadata::set_remote_head(&tx, &uuid).expect("update succeeded");
+        assert_eq!(uuid, SyncMetadata::remote_head(&tx).expect("fetch succeeded"));
     }
 
     #[test]
@@ -117,7 +133,7 @@ mod tests {
         db::ensure_current_version(&mut conn).expect("mentat db init");
         let db_tx = conn.transaction().expect("transaction");
 
-        let (root_tx, last_tx) = SyncMetadataClient::root_and_head_tx(&db_tx).expect("last tx");
+        let (root_tx, last_tx) = SyncMetadata::root_and_head_tx(&db_tx).expect("last tx");
         assert_eq!(268435456, root_tx);
         assert_eq!(268435456, last_tx);
 
@@ -133,13 +149,15 @@ mod tests {
         // ... ident
         // 65536|11|1|268435457|1|1
 
-        db_tx.execute("INSERT INTO transactions VALUES (?, ?, ?, ?, ?, ?)", &[&268435457, &3, &1529971773701734_i64, &268435457, &1, &4]).expect("inserted");
-        db_tx.execute("INSERT INTO transactions VALUES (?, ?, ?, ?, ?, ?)", &[&65536, &1, &":person/name", &268435457, &1, &13]).expect("inserted");
-        db_tx.execute("INSERT INTO transactions VALUES (?, ?, ?, ?, ?, ?)", &[&65536, &7, &27, &268435457, &1, &0]).expect("inserted");
-        db_tx.execute("INSERT INTO transactions VALUES (?, ?, ?, ?, ?, ?)", &[&65536, &9, &36, &268435457, &1, &0]).expect("inserted");
-        db_tx.execute("INSERT INTO transactions VALUES (?, ?, ?, ?, ?, ?)", &[&65536, &11, &1, &268435457, &1, &1]).expect("inserted");
+        // last attribute is the timeline (0).
 
-        let (root_tx, last_tx) = SyncMetadataClient::root_and_head_tx(&db_tx).expect("last tx");
+        db_tx.execute("INSERT INTO transactions VALUES (?, ?, ?, ?, ?, ?, ?)", &[&268435457, &3, &1529971773701734_i64, &268435457, &1, &4, &0]).expect("inserted");
+        db_tx.execute("INSERT INTO transactions VALUES (?, ?, ?, ?, ?, ?, ?)", &[&65536, &1, &":person/name", &268435457, &1, &13, &0]).expect("inserted");
+        db_tx.execute("INSERT INTO transactions VALUES (?, ?, ?, ?, ?, ?, ?)", &[&65536, &7, &27, &268435457, &1, &0, &0]).expect("inserted");
+        db_tx.execute("INSERT INTO transactions VALUES (?, ?, ?, ?, ?, ?, ?)", &[&65536, &9, &36, &268435457, &1, &0, &0]).expect("inserted");
+        db_tx.execute("INSERT INTO transactions VALUES (?, ?, ?, ?, ?, ?, ?)", &[&65536, &11, &1, &268435457, &1, &1, &0]).expect("inserted");
+
+        let (root_tx, last_tx) = SyncMetadata::root_and_head_tx(&db_tx).expect("last tx");
         assert_eq!(268435456, root_tx);
         assert_eq!(268435457, last_tx);
     }

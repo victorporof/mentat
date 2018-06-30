@@ -37,7 +37,7 @@ use entity_builder::{
 use mentat_tolstoy::{
     PartitionsTable,
     Syncer,
-    SyncMetadataClient,
+    SyncMetadata,
     SyncResult,
     Tx,
     TxMapper,
@@ -87,7 +87,7 @@ fn fast_forward_local<'a, 'c>(in_progress: &mut InProgress<'a, 'c>, txs: Vec<Tx>
     // We've just transacted a new tx, and generated a new tx entid.  Map it to the corresponding
     // incoming tx uuid, advance our "locally known remote head".
     if let Some((entid, uuid)) = last_tx {
-        SyncMetadataClient::set_remote_head(&mut in_progress.transaction, &uuid)?;
+        SyncMetadata::set_remote_head(&mut in_progress.transaction, &uuid)?;
         TxMapper::set_tx_uuid(&mut in_progress.transaction, entid, &uuid)?;
     }
 
@@ -129,8 +129,8 @@ impl Conn {
 
         match incoming_partition {
             Some(incoming) => {
-                let root = SyncMetadataClient::get_partitions(&in_progress.transaction, PartitionsTable::Core)?;
-                let current = SyncMetadataClient::get_partitions(&in_progress.transaction, PartitionsTable::Tolstoy)?;
+                let root = SyncMetadata::get_partitions(&in_progress.transaction, PartitionsTable::Core)?;
+                let current = SyncMetadata::get_partitions(&in_progress.transaction, PartitionsTable::Tolstoy)?;
                 let updated_db = renumber(&in_progress.transaction, &root, &current, &incoming)?;
                 in_progress.partition_map = updated_db.partition_map;
                 ()

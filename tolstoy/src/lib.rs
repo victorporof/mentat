@@ -40,7 +40,7 @@ pub mod bootstrap;
 pub mod metadata;
 pub use metadata::{
     PartitionsTable,
-    SyncMetadataClient,
+    SyncMetadata,
 };
 mod parts;
 mod remote_client;

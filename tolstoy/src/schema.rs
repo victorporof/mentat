@@ -55,7 +55,7 @@ pub mod tests {
 
     use metadata::{
         PartitionsTable,
-        SyncMetadataClient,
+        SyncMetadata,
     };
 
     use mentat_db::USER0;
@@ -103,7 +103,7 @@ pub mod tests {
             (_, _) => { panic!("Wrong number of results."); },
         }
 
-        let partitions = SyncMetadataClient::get_partitions(&tx, PartitionsTable::Tolstoy).unwrap();
+        let partitions = SyncMetadata::get_partitions(&tx, PartitionsTable::Tolstoy).unwrap();
 
         assert_eq!(partitions.len(), BOOTSTRAP_PARTITIONS.len());
 
@@ -155,7 +155,7 @@ pub mod tests {
             (_, _) => { panic!("Wrong number of results."); },
         }
 
-        let partitions = SyncMetadataClient::get_partitions(&tx, PartitionsTable::Tolstoy).unwrap();
+        let partitions = SyncMetadata::get_partitions(&tx, PartitionsTable::Tolstoy).unwrap();
 
         assert_eq!(partitions.len(), BOOTSTRAP_PARTITIONS.len());
 
