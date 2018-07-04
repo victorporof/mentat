@@ -94,7 +94,7 @@ fn assert_tx_datoms_count(receiver: &TestingReceiver, tx_num: usize, expected_da
 #[test]
 fn test_reader() {
     let mut c = new_connection("").expect("Couldn't open conn.");
-    let mut conn = Conn::connect(&mut c).expect("Couldn't open DB.");
+    let conn = Conn::connect(&mut c).expect("Couldn't open DB.");
     {
         let db_tx = c.transaction().expect("db tx");
         // Don't inspect the bootstrap transaction, but we'd like to see it's there.

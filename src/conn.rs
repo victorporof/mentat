@@ -582,7 +582,6 @@ impl Conn {
     /// Prepare the provided SQLite handle for use as a Mentat store. Creates tables but
     /// _does not_ write the bootstrap schema. This constructor should only be used by
     /// consumers that expect to populate raw transaction data themselves.
-
     pub(crate) fn empty(sqlite: &mut rusqlite::Connection) -> Result<Conn> {
         let (tx, db) = db::create_empty_current_version(sqlite)?;
         tx.commit()?;
@@ -717,7 +716,7 @@ impl Conn {
     }
 
     /// Take a SQLite transaction.
-    fn begin_transaction_with_behavior<'m, 'conn>(&'m mut self, sqlite: &'conn mut rusqlite::Connection, behavior: TransactionBehavior) -> Result<InProgress<'m, 'conn>> {
+    fn begin_transaction_with_behavior<'m, 'conn>(&'m self, sqlite: &'conn mut rusqlite::Connection, behavior: TransactionBehavior) -> Result<InProgress<'m, 'conn>> {
         let tx = sqlite.transaction_with_behavior(behavior)?;
         let (current_generation, current_partition_map, current_schema, cache_cow) =
         {
@@ -746,12 +745,12 @@ impl Conn {
 
     // Helper to avoid passing connections around.
     // Make both args mutable so that we can't have parallel access.
-    pub fn begin_read<'m, 'conn>(&'m mut self, sqlite: &'conn mut rusqlite::Connection) -> Result<InProgressRead<'m, 'conn>> {
+    pub fn begin_read<'m, 'conn>(&'m self, sqlite: &'conn mut rusqlite::Connection) -> Result<InProgressRead<'m, 'conn>> {
         self.begin_transaction_with_behavior(sqlite, TransactionBehavior::Deferred)
             .map(InProgressRead)
     }
 
-    pub fn begin_uncached_read<'m, 'conn>(&'m mut self, sqlite: &'conn mut rusqlite::Connection) -> Result<InProgressRead<'m, 'conn>> {
+    pub fn begin_uncached_read<'m, 'conn>(&'m self, sqlite: &'conn mut rusqlite::Connection) -> Result<InProgressRead<'m, 'conn>> {
         self.begin_transaction_with_behavior(sqlite, TransactionBehavior::Deferred)
             .map(|mut ip| {
                 ip.use_caching(false);
@@ -763,20 +762,20 @@ impl Conn {
     /// connections from taking immediate or exclusive transactions. This is appropriate for our
     /// writes and `InProgress`: it means we are ready to write whenever we want to, and nobody else
     /// can start a transaction that's not `DEFERRED`, but we don't need exclusivity yet.
-    pub fn begin_transaction<'m, 'conn>(&'m mut self, sqlite: &'conn mut rusqlite::Connection) -> Result<InProgress<'m, 'conn>> {
+    pub fn begin_transaction<'m, 'conn>(&'m self, sqlite: &'conn mut rusqlite::Connection) -> Result<InProgress<'m, 'conn>> {
         self.begin_transaction_with_behavior(sqlite, TransactionBehavior::Immediate)
     }
 
     /// Transact entities against the Mentat store, using the given connection and the current
     /// metadata.
-    pub fn transact<B>(&mut self,
+    pub fn transact<T>(&self,
                     sqlite: &mut rusqlite::Connection,
-                    transaction: B) -> Result<TxReport> where B: Borrow<str> {
+                    transaction: T) -> Result<TxReport> where T: AsRef<str> {
         // Parse outside the SQL transaction. This is a tradeoff: we are limiting the scope of the
         // transaction, and indeed we don't even create a SQL transaction if the provided input is
         // invalid, but it means SQLite errors won't be found until the parse is complete, and if
         // there's a race for the database (don't do that!) we are less likely to win it.
-        let entities = edn::parse::entities(transaction.borrow())?;
+        let entities = edn::parse::entities(transaction.as_ref())?;
 
         let mut in_progress = self.begin_transaction(sqlite)?;
         let report = in_progress.transact_entities(entities)?;
@@ -790,7 +789,7 @@ impl Conn {
     /// `cache_action` determines if the attribute should be added or removed from the cache.
     /// CacheAction::Add is idempotent - each attribute is only added once.
     /// CacheAction::Remove throws an error if the attribute does not currently exist in the cache.
-    pub fn cache(&mut self,
+    pub fn cache(&self,
                  sqlite: &mut rusqlite::Connection,
                  schema: &Schema,
                  attribute: &Keyword,
@@ -822,11 +821,11 @@ impl Conn {
         }
     }
 
-    pub fn register_observer(&mut self, key: String, observer: Arc<TxObserver>) {
+    pub fn register_observer(&self, key: String, observer: Arc<TxObserver>) {
         self.tx_observer_service.lock().unwrap().register(key, observer);
     }
 
-    pub fn unregister_observer(&mut self, key: &String) {
+    pub fn unregister_observer(&self, key: &String) {
         self.tx_observer_service.lock().unwrap().deregister(key);
     }
 }
@@ -863,7 +862,7 @@ mod tests {
     #[test]
     fn test_transact_does_not_collide_existing_entids() {
         let mut sqlite = db::new_connection("").unwrap();
-        let mut conn = Conn::connect(&mut sqlite).unwrap();
+        let conn = Conn::connect(&mut sqlite).unwrap();
 
         // Let's find out the next ID that'll be allocated. We're going to try to collide with it
         // a bit later.
@@ -889,7 +888,7 @@ mod tests {
     #[test]
     fn test_transact_does_not_collide_new_entids() {
         let mut sqlite = db::new_connection("").unwrap();
-        let mut conn = Conn::connect(&mut sqlite).unwrap();
+        let conn = Conn::connect(&mut sqlite).unwrap();
 
         // Let's find out the next ID that'll be allocated. We're going to try to collide with it.
         let next = conn.metadata.lock().expect("metadata").partition_map[":db.part/user"].index;
@@ -923,7 +922,7 @@ mod tests {
     #[test]
     fn test_compound_transact() {
         let mut sqlite = db::new_connection("").unwrap();
-        let mut conn = Conn::connect(&mut sqlite).unwrap();
+        let conn = Conn::connect(&mut sqlite).unwrap();
 
         let tempid_offset = get_next_entid(&conn);
 
@@ -964,7 +963,7 @@ mod tests {
     #[test]
     fn test_simple_prepared_query() {
         let mut c = db::new_connection("").expect("Couldn't open conn.");
-        let mut conn = Conn::connect(&mut c).expect("Couldn't open DB.");
+        let conn = Conn::connect(&mut c).expect("Couldn't open DB.");
         conn.transact(&mut c, r#"[
             [:db/add "s" :db/ident :foo/boolean]
             [:db/add "s" :db/valueType :db.type/boolean]
@@ -1001,7 +1000,7 @@ mod tests {
     #[test]
     fn test_compound_rollback() {
         let mut sqlite = db::new_connection("").unwrap();
-        let mut conn = Conn::connect(&mut sqlite).unwrap();
+        let conn = Conn::connect(&mut sqlite).unwrap();
 
         let tempid_offset = get_next_entid(&conn);
 
@@ -1051,7 +1050,7 @@ mod tests {
     #[test]
     fn test_transact_errors() {
         let mut sqlite = db::new_connection("").unwrap();
-        let mut conn = Conn::connect(&mut sqlite).unwrap();
+        let conn = Conn::connect(&mut sqlite).unwrap();
 
         // Good: empty transaction.
         let report = conn.transact(&mut sqlite, "[]").unwrap();
@@ -1096,7 +1095,7 @@ mod tests {
     #[test]
     fn test_add_to_cache_failure_no_attribute() {
         let mut sqlite = db::new_connection("").unwrap();
-        let mut conn = Conn::connect(&mut sqlite).unwrap();
+        let conn = Conn::connect(&mut sqlite).unwrap();
         let _report = conn.transact(&mut sqlite, r#"[
             {  :db/ident       :foo/bar
                :db/valueType   :db.type/long },
@@ -1117,7 +1116,7 @@ mod tests {
     fn test_lookup_attribute_with_caching() {
 
         let mut sqlite = db::new_connection("").unwrap();
-        let mut conn = Conn::connect(&mut sqlite).unwrap();
+        let conn = Conn::connect(&mut sqlite).unwrap();
         let _report = conn.transact(&mut sqlite, r#"[
             {  :db/ident       :foo/bar
                :db/valueType   :db.type/long },
@@ -1176,7 +1175,7 @@ mod tests {
     #[test]
     fn test_cache_usage() {
         let mut sqlite = db::new_connection("").unwrap();
-        let mut conn = Conn::connect(&mut sqlite).unwrap();
+        let conn = Conn::connect(&mut sqlite).unwrap();
 
         let db_ident = (*conn.current_schema()).get_entid(&kw!(:db/ident)).expect("db_ident").0;
         let db_type = (*conn.current_schema()).get_entid(&kw!(:db/valueType)).expect("db_ident").0;
