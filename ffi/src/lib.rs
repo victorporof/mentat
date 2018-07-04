@@ -107,6 +107,7 @@ pub use mentat::{
     QueryResults,
     RelResult,
     Store,
+    Stores,
     Syncable,
     TypedValue,
     TxObserver,
@@ -212,7 +213,7 @@ impl<'a, 'c> InProgressTransactResult<'a, 'c> {
 pub extern "C" fn store_open(uri: *const c_char) -> *mut Store {
     assert_not_null!(uri);
     let uri = c_char_to_string(uri);
-    let store = Store::open(&uri).expect("expected a store");
+    let store = Stores::open_store(&uri).expect("expected a store");
     Box::into_raw(Box::new(store))
 }
 
@@ -222,7 +223,15 @@ pub extern "C" fn store_open(uri: *const c_char) -> *mut Store {
 pub extern "C" fn store_open_encrypted(uri: *const c_char, key: *const c_char) -> *mut Store {
     let uri = c_char_to_string(uri);
     let key = c_char_to_string(key);
-    let store = Store::open_with_key(&uri, &key).expect("expected a store");
+    let store = Stores::open_with_key(&uri, &key).expect("expected a store");
+    Box::into_raw(Box::new(store))
+}
+
+/// Variant of store_open that opens a named in-memory database.
+#[no_mangle]
+pub extern "C" fn store_open_named_in_memory_store(name: *const c_char) -> *mut Store {
+    let name = c_char_to_string(name);
+    let store = Stores::open_named_in_memory_store(name).expect("expected a store");
     Box::into_raw(Box::new(store))
 }
 
@@ -1559,7 +1568,6 @@ pub unsafe extern "C" fn typed_value_into_long(typed_value: *mut Binding) -> c_l
 pub unsafe extern "C" fn typed_value_into_entid(typed_value: *mut Binding) -> Entid {
     assert_not_null!(typed_value);
     let typed_value = Box::from_raw(typed_value);
-    println!("typed value as entid {:?}", typed_value);
     unwrap_conversion(typed_value.into_entid(), ValueType::Ref)
 }
 

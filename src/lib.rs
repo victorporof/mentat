@@ -121,6 +121,7 @@ pub mod entity_builder;
 pub mod query;
 pub mod query_builder;
 pub mod store;
+pub mod stores;
 pub mod vocabulary;
 
 pub use query::{
@@ -154,6 +155,10 @@ pub use conn::{
 
 pub use store::{
     Store,
+};
+
+pub use stores::{
+    Stores,
 };
 
 #[cfg(test)]

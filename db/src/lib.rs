@@ -78,6 +78,7 @@ pub use entids::{
 pub use db::{
     TypedSQLValue,
     new_connection,
+    make_connection,
 };
 
 #[cfg(feature = "sqlcipher")]

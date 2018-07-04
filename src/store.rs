@@ -65,17 +65,25 @@ use query::{
 /// A convenience wrapper around a single SQLite connection and a Conn. This is suitable
 /// for applications that don't require complex connection management.
 pub struct Store {
-    conn: Conn,
+    conn: Arc<Conn>,
     sqlite: rusqlite::Connection,
 }
 
 impl Store {
+    /// Create a Store from a connection and Conn.
+    pub fn new(conn: Arc<Conn>, connection: rusqlite::Connection) -> Result<Store> {
+        Ok(Store {
+            conn: conn,
+            sqlite: connection,
+        })
+    }
+
     /// Open a store at the supplied path, ensuring that it includes the bootstrap schema.
     pub fn open(path: &str) -> Result<Store> {
         let mut connection = ::new_connection(path)?;
         let conn = Conn::connect(&mut connection)?;
         Ok(Store {
-            conn: conn,
+            conn: Arc::new(conn),
             sqlite: connection,
         })
     }
@@ -91,7 +99,7 @@ impl Store {
         let mut connection = ::new_connection(path)?;
         let conn = Conn::empty(&mut connection)?;
         Ok(Store {
-            conn: conn,
+            conn: Arc::new(conn),
             sqlite: connection,
         })
     }
@@ -113,7 +121,7 @@ impl Store {
         let mut connection = ::new_connection_with_key(path, encryption_key)?;
         let conn = Conn::connect(&mut connection)?;
         Ok(Store {
-            conn: conn,
+            conn: Arc::new(conn),
             sqlite: connection,
         })
     }
@@ -131,7 +139,7 @@ impl Store {
         let mut connection = ::new_connection_with_key(path, encryption_key)?;
         let conn = Conn::empty(&mut connection)?;
         Ok(Store {
-            conn: conn,
+            conn: Arc::new(conn),
             sqlite: connection,
         })
     }
@@ -159,12 +167,12 @@ impl Store {
 }
 
 impl Store {
-    pub fn dismantle(self) -> (rusqlite::Connection, Conn) {
+    pub fn dismantle(self) -> (rusqlite::Connection, Arc<Conn>) {
         (self.sqlite, self.conn)
     }
 
-    pub fn conn(&self) -> &Conn {
-        &self.conn
+    pub fn conn(&self) -> Arc<Conn> {
+        self.conn.clone()
     }
 
     pub fn begin_read<'m>(&'m mut self) -> Result<InProgressRead<'m, 'm>> {
