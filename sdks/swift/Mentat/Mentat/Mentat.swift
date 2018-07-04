@@ -61,6 +61,17 @@ open class Mentat: RustObject {
     public convenience init(storeURI: String = "") {
         self.init(raw: store_open(storeURI))
     }
+    
+    /**
+     Open a connection to a Store in a given location.
+     If the store does not already exist, one will be created.
+     
+     - Parameter storeURI: The URI as a String of the store to open.
+     If no store URI is provided, an in-memory store will be opened.
+     */
+    public convenience init(namedInMemoryStore name: String) {
+        self.init(raw: store_open_named_in_memory_store(name))
+    }
 
     /**
      Add an attribute to the cache. The {@link CacheDirection} determines how that attribute can be

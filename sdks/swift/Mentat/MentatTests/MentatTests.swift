@@ -32,6 +32,11 @@ class MentatTests: XCTestCase {
     func testOpenInMemoryStore() {
         XCTAssertNotNil(Mentat().raw)
     }
+    
+    // test that a store can be opened in memory
+    func testOpenNamedInMemoryStore() {
+        XCTAssertNotNil(Mentat(namedInMemoryStore: "testOpenInMemoryStore").raw)
+    }
 
     // test that a store can be opened in a specific location
     func testOpenStoreInLocation() {
@@ -80,7 +85,7 @@ class MentatTests: XCTestCase {
 
     func openAndInitializeCitiesStore() -> Mentat {
         guard let mentat = self.store else {
-            let mentat = Mentat()
+            let mentat = Mentat(namedInMemoryStore: "openAndInitializeCitiesStore")
             let _ = try! self.transactCitiesSchema(mentat: mentat)
             let _ = try! self.transactSeattleData(mentat: mentat)
             self.store = mentat
@@ -154,7 +159,7 @@ class MentatTests: XCTestCase {
 
     func test1TransactVocabulary() {
         do {
-            let mentat = Mentat()
+            let mentat = Mentat(namedInMemoryStore: "test1TransactVocabulary")
             let vocab = try readCitiesSchema()
             let report = try mentat.transact(transaction: vocab)
             XCTAssertNotNil(report)
@@ -166,7 +171,7 @@ class MentatTests: XCTestCase {
 
     func test2TransactEntities() {
         do {
-            let mentat = Mentat()
+            let mentat = Mentat(namedInMemoryStore: "test2TransactEntities")
             let vocab = try readCitiesSchema()
             let _ = try mentat.transact(transaction: vocab)
             let data = try readSeattleData()
@@ -338,7 +343,7 @@ class MentatTests: XCTestCase {
     }
 
     func testBindLong() {
-        let mentat = Mentat()
+        let mentat = Mentat(namedInMemoryStore: "testBindLong")
         let (_, report) = self.populateWithTypesSchema(mentat: mentat)
         let aEntid = report!.entid(forTempId: "a")
         let query = "[:find ?e . :in ?long :where [?e :foo/long ?long]]"
@@ -358,7 +363,7 @@ class MentatTests: XCTestCase {
     }
 
     func testBindRef() {
-        let mentat = Mentat()
+        let mentat = Mentat(namedInMemoryStore: "testBindRef")
         let (_, report) = self.populateWithTypesSchema(mentat: mentat)
         let stringEntid = mentat.entidForAttribute(attribute: ":foo/string")
         let bEntid = report!.entid(forTempId: "b")
@@ -379,7 +384,7 @@ class MentatTests: XCTestCase {
     }
 
     func testBindKwRef() {
-        let mentat = Mentat()
+        let mentat = Mentat(namedInMemoryStore: "testBindKwRef")
         let (_, report) = self.populateWithTypesSchema(mentat: mentat)
         let bEntid = report!.entid(forTempId: "b")
         let query = "[:find ?e . :in ?ref :where [?e :foo/ref ?ref]]"
@@ -399,7 +404,7 @@ class MentatTests: XCTestCase {
     }
 
     func testBindKw() {
-        let mentat = Mentat()
+        let mentat = Mentat(namedInMemoryStore: "testBindKw")
         let (_, report) = self.populateWithTypesSchema(mentat: mentat)
         let aEntid = report!.entid(forTempId: "a")
         let query = "[:find ?e . :in ?kw :where [?e :foo/keyword ?kw]]"
@@ -419,7 +424,7 @@ class MentatTests: XCTestCase {
     }
 
     func testBindDate() {
-        let mentat = Mentat()
+        let mentat = Mentat(namedInMemoryStore: "testBindDate")
         let (_, report) = self.populateWithTypesSchema(mentat: mentat)
         let aEntid = report!.entid(forTempId: "a")
         let query = "[:find [?e ?d] :in ?now :where [?e :foo/instant ?d] [(< ?d ?now)]]"
@@ -465,7 +470,7 @@ class MentatTests: XCTestCase {
     }
 
     func testBindUuid() {
-        let mentat = Mentat()
+        let mentat = Mentat(namedInMemoryStore: "testBindUuid")
         let (_, report) = self.populateWithTypesSchema(mentat: mentat)
         let aEntid = report!.entid(forTempId: "a")
         let query = "[:find ?e . :in ?uuid :where [?e :foo/uuid ?uuid]]"
@@ -486,7 +491,7 @@ class MentatTests: XCTestCase {
     }
 
     func testBindBoolean() {
-        let mentat = Mentat()
+        let mentat = Mentat(namedInMemoryStore: "testBindBoolean")
         let (_, report) = self.populateWithTypesSchema(mentat: mentat)
         let aEntid = report!.entid(forTempId: "a")
         let query = "[:find ?e . :in ?bool :where [?e :foo/boolean ?bool]]"
@@ -506,7 +511,7 @@ class MentatTests: XCTestCase {
     }
 
     func testBindDouble() {
-        let mentat = Mentat()
+        let mentat = Mentat(namedInMemoryStore: "testBindDouble")
         let (_, report) = self.populateWithTypesSchema(mentat: mentat)
         let aEntid = report!.entid(forTempId: "a")
         let query = "[:find ?e . :in ?double :where [?e :foo/double ?double]]"
@@ -526,7 +531,7 @@ class MentatTests: XCTestCase {
     }
 
     func testTypedValueAsLong() {
-        let mentat = Mentat()
+        let mentat = Mentat(namedInMemoryStore: "testTypedValueAsLong")
         let (_, report) = self.populateWithTypesSchema(mentat: mentat)
         let aEntid = report!.entid(forTempId: "a")!
         let query = "[:find ?v . :in ?e :where [?e :foo/long ?v]]"
@@ -547,7 +552,7 @@ class MentatTests: XCTestCase {
     }
 
     func testTypedValueAsRef() {
-        let mentat = Mentat()
+        let mentat = Mentat(namedInMemoryStore: "testTypedValueAsRef")
         let (_, report) = self.populateWithTypesSchema(mentat: mentat)
         let aEntid = report!.entid(forTempId: "a")!
         let query = "[:find ?e . :where [?e :foo/long 25]]"
@@ -567,7 +572,7 @@ class MentatTests: XCTestCase {
     }
 
     func testTypedValueAsKw() {
-        let mentat = Mentat()
+        let mentat = Mentat(namedInMemoryStore: "testTypedValueAsKw")
         let (_, report) = self.populateWithTypesSchema(mentat: mentat)
         let aEntid = report!.entid(forTempId: "a")!
         let query = "[:find ?v . :in ?e :where [?e :foo/keyword ?v]]"
@@ -588,7 +593,7 @@ class MentatTests: XCTestCase {
     }
 
     func testTypedValueAsBoolean() {
-        let mentat = Mentat()
+        let mentat = Mentat(namedInMemoryStore: "testTypedValueAsBoolean")
         let (_, report) = self.populateWithTypesSchema(mentat: mentat)
         let aEntid = report!.entid(forTempId: "a")!
         let query = "[:find ?v . :in ?e :where [?e :foo/boolean ?v]]"
@@ -609,7 +614,7 @@ class MentatTests: XCTestCase {
     }
 
     func testTypedValueAsDouble() {
-        let mentat = Mentat()
+        let mentat = Mentat(namedInMemoryStore: "testTypedValueAsDouble")
         let (_, report) = self.populateWithTypesSchema(mentat: mentat)
         let aEntid = report!.entid(forTempId: "a")!
         let query = "[:find ?v . :in ?e :where [?e :foo/double ?v]]"
@@ -630,7 +635,7 @@ class MentatTests: XCTestCase {
     }
 
     func testTypedValueAsDate() {
-        let mentat = Mentat()
+        let mentat = Mentat(namedInMemoryStore: "testTypedValueAsDate")
         let (_, report) = self.populateWithTypesSchema(mentat: mentat)
         let aEntid = report!.entid(forTempId: "a")!
         let query = "[:find ?v . :in ?e :where [?e :foo/instant ?v]]"
@@ -656,7 +661,7 @@ class MentatTests: XCTestCase {
     }
 
     func testTypedValueAsString() {
-        let mentat = Mentat()
+        let mentat = Mentat(namedInMemoryStore: "testTypedValueAsString")
         let (_, report) = self.populateWithTypesSchema(mentat: mentat)
         let aEntid = report!.entid(forTempId: "a")!
         let query = "[:find ?v . :in ?e :where [?e :foo/string ?v]]"
@@ -677,7 +682,7 @@ class MentatTests: XCTestCase {
     }
 
     func testTypedValueAsUuid() {
-        let mentat = Mentat()
+        let mentat = Mentat(namedInMemoryStore: "testTypedValueAsUuid")
         let (_, report) = self.populateWithTypesSchema(mentat: mentat)
         let aEntid = report!.entid(forTempId: "a")!
         let query = "[:find ?v . :in ?e :where [?e :foo/uuid ?v]]"
@@ -699,7 +704,7 @@ class MentatTests: XCTestCase {
     }
 
     func testValueForAttributeOfEntity() {
-        let mentat = Mentat()
+        let mentat = Mentat(namedInMemoryStore: "testValueForAttributeOfEntity")
         let (_, report) = self.populateWithTypesSchema(mentat: mentat)
         let aEntid = report!.entid(forTempId: "a")!
         var value: TypedValue? = nil;
@@ -709,14 +714,14 @@ class MentatTests: XCTestCase {
     }
 
     func testEntidForAttribute() {
-        let mentat = Mentat()
+        let mentat = Mentat(namedInMemoryStore: "testEntidForAttribute")
         let _ = self.populateWithTypesSchema(mentat: mentat)
         let entid = mentat.entidForAttribute(attribute: ":foo/long")
         assert(entid == 65540)
     }
 
     func testMultipleQueries() {
-        let mentat = Mentat()
+        let mentat = Mentat(namedInMemoryStore: "testMultipleQueries")
         let _ = self.populateWithTypesSchema(mentat: mentat)
         let q1 = mentat.query(query: "[:find ?x :where [?x _ _]]")
 
@@ -741,7 +746,7 @@ class MentatTests: XCTestCase {
     }
 
     func testNestedQueries() {
-        let mentat = Mentat()
+        let mentat = Mentat(namedInMemoryStore: "testNestedQueries")
         let _ = self.populateWithTypesSchema(mentat: mentat)
         let q1 = mentat.query(query: "[:find ?x :where [?x _ _]]")
         let q2 = mentat.query(query: "[:find ?x :where [_ _ ?x]]")
@@ -763,13 +768,13 @@ class MentatTests: XCTestCase {
     }
 
     func test3InProgressTransact() {
-        let mentat = Mentat()
+        let mentat = Mentat(namedInMemoryStore: "test3InProgressTransact")
         let (_, report) = self.populateWithTypesSchema(mentat: mentat)
         XCTAssertNotNil(report)
     }
 
     func testInProgressRollback() {
-        let mentat = Mentat()
+        let mentat = Mentat(namedInMemoryStore: "testInProgressRollback")
         let (_, report) = self.populateWithTypesSchema(mentat: mentat)
         XCTAssertNotNil(report)
         let aEntid = report!.entid(forTempId: "a")!
@@ -787,7 +792,7 @@ class MentatTests: XCTestCase {
     }
 
     func testInProgressEntityBuilder() {
-        let mentat = Mentat()
+        let mentat = Mentat(namedInMemoryStore: "testInProgressEntityBuilder")
         let (schemaReport, dataReport) = self.populateWithTypesSchema(mentat: mentat)
         let bEntid = dataReport!.entid(forTempId: "b")!
         let longEntid = schemaReport!.entid(forTempId: "l")!
@@ -852,7 +857,7 @@ class MentatTests: XCTestCase {
     }
 
     func testEntityBuilderForEntid() {
-        let mentat = Mentat()
+        let mentat = Mentat(namedInMemoryStore: "testEntityBuilderForEntid")
         let (schemaReport, dataReport) = self.populateWithTypesSchema(mentat: mentat)
         let bEntid = dataReport!.entid(forTempId: "b")!
         let longEntid = schemaReport!.entid(forTempId: "l")!
@@ -917,7 +922,7 @@ class MentatTests: XCTestCase {
     }
 
     func testEntityBuilderForTempid() {
-        let mentat = Mentat()
+        let mentat = Mentat(namedInMemoryStore: "testEntityBuilderForTempid")
         let (schemaReport, _) = self.populateWithTypesSchema(mentat: mentat)
         let longEntid = schemaReport!.entid(forTempId: "l")!
         // test that the values are as expected
@@ -964,7 +969,7 @@ class MentatTests: XCTestCase {
     }
 
     func testInProgressBuilderTransact() {
-        let mentat = Mentat()
+        let mentat = Mentat(namedInMemoryStore: "testInProgressBuilderTransact")
         let (schemaReport, dataReport) = self.populateWithTypesSchema(mentat: mentat)
         let aEntid = dataReport!.entid(forTempId: "a")!
         let bEntid = dataReport!.entid(forTempId: "b")!
@@ -1020,7 +1025,7 @@ class MentatTests: XCTestCase {
     }
 
     func testEntityBuilderTransact() {
-        let mentat = Mentat()
+        let mentat = Mentat(namedInMemoryStore: "testEntityBuilderTransact")
         let (schemaReport, dataReport) = self.populateWithTypesSchema(mentat: mentat)
         let aEntid = dataReport!.entid(forTempId: "a")!
         let bEntid = dataReport!.entid(forTempId: "b")!
@@ -1076,7 +1081,7 @@ class MentatTests: XCTestCase {
     }
 
     func testEntityBuilderRetract() {
-        let mentat = Mentat()
+        let mentat = Mentat(namedInMemoryStore: "testEntityBuilderRetract")
         let (schemaReport, dataReport) = self.populateWithTypesSchema(mentat: mentat)
         let bEntid = dataReport!.entid(forTempId: "b")!
         let stringEntid = schemaReport!.entid(forTempId: "s")!
@@ -1126,7 +1131,7 @@ class MentatTests: XCTestCase {
     }
 
     func testInProgressEntityBuilderRetract() {
-        let mentat = Mentat()
+        let mentat = Mentat(namedInMemoryStore: "testInProgressEntityBuilderRetract")
         let (schemaReport, dataReport) = self.populateWithTypesSchema(mentat: mentat)
         let bEntid = dataReport!.entid(forTempId: "b")!
         let stringEntid = schemaReport!.entid(forTempId: "s")!

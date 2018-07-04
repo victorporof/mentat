@@ -36,7 +36,7 @@ public class Mentat extends RustObject<JNA.Store> {
     }
 
     /**
-     * Open a connection to an in-memory Store.
+     * Open a connection to an anonymous in-memory Store.
      */
     public Mentat() {
         this(JNA.INSTANCE.store_open(""));
@@ -47,6 +47,15 @@ public class Mentat extends RustObject<JNA.Store> {
      * @param rawPointer    A pointer to a Mentat Store.
      */
     public Mentat(JNA.Store rawPointer) { super(rawPointer); }
+
+    /**
+     * Open a connection to a named in-memory Store.
+     * @param name    The named to be given to the in memory store to open.
+     * @return  An instance of Mentat connected to a named in memory store.
+     */
+    public static Mentat namedInMemoryStore(String name) {
+        return new Mentat(JNA.INSTANCE.store_open_named_in_memory_store(name));
+    }
 
     /**
      * Add an attribute to the cache. The {@link CacheDirection} determines how that attribute can be

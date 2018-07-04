@@ -43,6 +43,7 @@ public interface JNA extends Library {
     class EntityBuilder extends PointerType {}
 
     Store store_open(String dbPath);
+    Store store_open_named_in_memory_store(String name);
 
     void destroy(Pointer obj);
     void uuid_destroy(Pointer obj);
