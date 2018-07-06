@@ -8,6 +8,8 @@
 // CONDITIONS OF ANY KIND, either express or implied. See the License for the
 // specific language governing permissions and limitations under the License.
 
+use rusqlite;
+
 use uuid::Uuid;
 
 use mentat_core::{
@@ -17,11 +19,79 @@ use mentat_core::{
 
 use mentat_db::PartitionMap;
 
+use errors::{
+    Result,
+};
+
+use tx_mapper::{
+    TxMapper,
+};
+
+#[derive(Debug, Clone)]
+pub enum TxIdentifier {
+    Global(Uuid),
+    Local(Entid),
+}
+
+impl From<Uuid> for TxIdentifier {
+    fn from(value: Uuid) -> TxIdentifier {
+        TxIdentifier::Global(value)
+    }
+}
+
+impl TxIdentifier {
+    pub fn as_local(&self, db_tx: &rusqlite::Transaction) -> Result<Option<Entid>> {
+        match self {
+            &TxIdentifier::Global(uuid) => Ok(TxMapper::get_tx_for_uuid(db_tx, &uuid)?),
+            &TxIdentifier::Local(e) => Ok(Some(e))
+        }
+    }
+
+    pub fn as_remote(&self, db_tx: &rusqlite::Transaction) -> Result<Option<Uuid>> {
+        match self {
+            &TxIdentifier::Global(uuid) => Ok(Some(uuid)),
+            &TxIdentifier::Local(e) => Ok(TxMapper::get(db_tx, e)?)
+        }
+    }
+}
+
+pub trait Transactable {
+    fn known_entid(&self) -> Option<Entid>;
+    fn parts(&self) -> &Vec<TxPart>;
+}
+
+// TODO unite these around TxIdentifier?
+#[derive(Debug, Clone)]
+pub struct LocalTx {
+    pub tx: Entid,
+    pub parts: Vec<TxPart>,
+}
+
 // For returning out of the downloader as an ordered list.
 #[derive(Debug, Clone)]
 pub struct Tx {
     pub tx: Uuid,
     pub parts: Vec<TxPart>,
+}
+
+impl Transactable for LocalTx {
+    fn known_entid(&self) -> Option<Entid> {
+        Some(self.tx)
+    }
+
+    fn parts(&self) -> &Vec<TxPart> {
+        &self.parts
+    }
+}
+
+impl Transactable for Tx {
+    fn known_entid(&self) -> Option<Entid> {
+        None
+    }
+
+    fn parts(&self) -> &Vec<TxPart> {
+        &self.parts
+    }
 }
 
 #[derive(Debug,Clone,Serialize,Deserialize)]

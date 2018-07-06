@@ -315,7 +315,7 @@ impl RemoteClient {
             }
 
             tx_list.push(Tx {
-                tx: tx,
+                tx: tx.into(),
                 parts: tx_parts
             });
         }

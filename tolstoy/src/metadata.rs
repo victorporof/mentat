@@ -103,6 +103,30 @@ impl SyncMetadata {
             Some(t) => Ok((root_tx, t?))
         }
     }
+
+    pub fn local_txs(db_tx: &rusqlite::Transaction, after: Option<Entid>) -> Result<Vec<Entid>> {
+        let after_clause = match after {
+            Some(t) => format!("WHERE tx > {}", t),
+            None => format!("")
+        };
+        let mut stmt: ::rusqlite::Statement = db_tx.prepare(&format!("SELECT tx FROM transactions {} GROUP BY tx ORDER BY tx", after_clause))?;
+        let txs: Vec<_> = stmt.query_and_then(&[], |row| -> Result<Entid> {
+            Ok(row.get_checked(0)?)
+        })?.collect();
+
+        let mut all = Vec::with_capacity(txs.len());
+        for tx in txs {
+            all.push(tx?);
+        }
+
+        Ok(all)
+    }
+
+    pub fn is_tx_empty(db_tx: &rusqlite::Transaction, tx_id: Entid) -> Result<bool> {
+        db_tx.query_row("SELECT count(rowid) FROM transactions WHERE tx = ? AND e != ?", &[&tx_id, &tx_id], |row| {
+            row.get(0)
+        }).map_err(|e| e.into())
+    }
 }
 
 #[cfg(test)]

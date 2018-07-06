@@ -37,12 +37,15 @@ use schema::{
 use tx_uploader::TxUploader;
 use tx_processor::{
     Processor,
+    TxReceiver,
 };
 use tx_mapper::{
     TxMapper,
 };
 use types::{
+    LocalTx,
     Tx,
+    TxPart,
 };
 
 use logger::d;
@@ -57,7 +60,7 @@ pub enum SyncResult {
     AdoptedRemoteOnFirstSync,
     IncompatibleBootstrapSchema,
     LocalFastForward(Vec<Tx>),
-    Merge,
+    Merge(Vec<Tx>, Vec<LocalTx>),
 }
 
 enum SyncAction {
@@ -84,7 +87,35 @@ pub enum LocalDataState {
     Unchanged,
 }
 
+pub struct LocalTxSet {
+    pub txs: Vec<LocalTx>,
+}
+
+impl LocalTxSet {
+    pub fn new() -> LocalTxSet {
+        LocalTxSet {
+            txs: vec![]
+        }
+    }
+}
+
+impl TxReceiver for LocalTxSet {
+    fn tx<T>(&mut self, tx_id: Entid, datoms: &mut T) -> Result<()>
+    where T: Iterator<Item=TxPart> {
+        self.txs.push(LocalTx {
+            tx: tx_id,
+            parts: datoms.collect()
+        });
+        Ok(())
+    }
+
+    fn done(&mut self) -> Result<()> {
+        Ok(())
+    }
+}
+
 impl Syncer {
+    /// Upload local txs: (from_tx, HEAD]
     fn fast_forward_server(db_tx: &mut rusqlite::Transaction, from_tx: Option<Entid>, remote_client: &RemoteClient, remote_head: &Uuid) -> Result<()> {
         let mut uploader = TxUploader::new(remote_client, remote_head, SyncMetadata::get_partitions(db_tx, PartitionsTable::Core)?);
         Processor::process(db_tx, from_tx, &mut uploader)?;
@@ -159,36 +190,102 @@ impl Syncer {
         }
     }
 
+    /// Unsafe and unaware brain surgery!
+    pub fn rewind_tx(db_tx: &rusqlite::Transaction, tx_id: Entid) -> Result<()> {
+        // Delete additions made in tx.
+        db_tx.execute("DELETE FROM datoms WHERE rowid IN (SELECT d.rowid FROM transactions AS t, datoms AS d
+                WHERE
+                    t.tx = ? AND
+                    t.e = d.e AND
+                    t.a = d.a AND
+                    t.value_type_tag = d.value_type_tag AND
+                    t.v = d.v)",
+                            &[&tx_id])?;
+        // Insert retractions made in tx.
+        db_tx.execute("INSERT INTO datoms (e, a, v, tx, value_type_tag) SELECT t.e, t.a, t.v, ?, t.value_type_tag FROM transactions AS t WHERE t.tx = ? AND t.added = 0", &[&tx_id, &tx_id])?;
+        Ok(())
+    }
+
+    pub fn eradicate_from_transactions(db_tx: &rusqlite::Transaction, tx_id: Entid) -> Result<()> {
+        db_tx.execute("DELETE FROM transactions WHERE tx = ?", &[&tx_id])?;
+        Ok(())
+    }
+    
+    fn map_remote_bootstrap(db_tx: &mut rusqlite::Transaction, remote_bootstrap: &Tx, local_bootstrap: Entid) -> Result<()> {
+        let helper = BootstrapHelper::new(remote_bootstrap);
+
+        if !helper.is_compatible()? {
+            bail!(TolstoyError::IncompatibleBootstrapSchema(CORE_SCHEMA_VERSION as i64, helper.core_schema_version()?));
+        }
+
+        d(&format!("mapping incoming bootstrap tx uuid to local bootstrap entid: {} -> {}", remote_bootstrap.tx, local_bootstrap));
+
+        // Map incoming bootstrap tx uuid to local bootstrap entid.
+        // If there's more work to do, we'll move the head again.
+        SyncMetadata::set_remote_head(db_tx, &remote_bootstrap.tx)?;
+        TxMapper::set_tx_uuid(db_tx, local_bootstrap, &remote_bootstrap.tx)?;
+
+        Ok(())
+    }
+
     fn first_sync_against_non_empty(db_tx: &mut rusqlite::Transaction, remote_client: &RemoteClient, local_metadata: &SyncMetadata) -> Result<SyncResult> {
         d(&format!("server non-empty on first sync, adopting remote state."));
 
+        // 1) Download remote transactions.
         let incoming_txs = remote_client.get_transaction_data_after(&Uuid::nil())?;
-
         if incoming_txs.len() == 0 {
             bail!(TolstoyError::BadServerState("Server specified non-root HEAD but gave no transactions".to_string()));
         }
 
-        // We assume that the first transaction encountered on first sync is the bootstrap transaction.
-        let bootstrap_tx = &incoming_txs[0];
-        let remote_bootstrap = BootstrapHelper::new(bootstrap_tx);
-        
-        if !remote_bootstrap.is_compatible()? {
-            bail!(TolstoyError::IncompatibleBootstrapSchema(CORE_SCHEMA_VERSION as i64, remote_bootstrap.core_schema_version()?));
+        // 2) Process remote bootstrap.
+        Syncer::map_remote_bootstrap(db_tx, &incoming_txs[0], local_metadata.root)?;
+
+        // 3) Determine new local and remote data states, now that bootstrap has been dealt with.
+        let remote_state = if incoming_txs.len() > 1 {
+            RemoteDataState::Changed
+        } else {
+            RemoteDataState::Unchanged
+        };
+
+        let local_state = if local_metadata.root != local_metadata.head {
+            LocalDataState::Changed
+        } else {
+            LocalDataState::Unchanged
+        };
+
+        // 4) The rest isn't special anymore: proceed with regular flow. TODO merge two flows together?
+        // This is largely the same as the main flow, except we already have a set of incoming transactions.
+
+        match Syncer::what_do(remote_state, local_state) {
+            SyncAction::NoOp => {
+                Ok(SyncResult::NoChanges)
+            },
+
+            SyncAction::PopulateServer => {
+                bail!(TolstoyError::UnexpectedState(format!("Remote state can't be empty on first sync against non-empty server")))
+            },
+
+            SyncAction::ServerFastForward => {
+                bail!(TolstoyError::NotYetImplemented(format!("TODO fast-forward server on first sync against non-empty when remote is just bootstrap and local has more")))
+            },
+
+            SyncAction::LocalFastForward => {
+                Ok(SyncResult::LocalFastForward(incoming_txs[1 ..].to_vec()))
+            },
+
+            SyncAction::CombineChanges => {
+                let mut local_txs = LocalTxSet::new();
+                Processor::process(db_tx, Some(local_metadata.root), &mut local_txs)?;
+                Ok(SyncResult::Merge(incoming_txs[1 ..].to_vec(), local_txs.txs))
+            }
         }
+    }
 
-        d(&format!("mapping incoming bootstrap tx uuid to local bootstrap entid: {} -> {}", bootstrap_tx.tx, local_metadata.root));
-
-        // Map incoming bootstrap tx uuid to local bootstrap entid.
-        // If there's more work to do, we'll move the head again.
-        SyncMetadata::set_remote_head(db_tx, &bootstrap_tx.tx)?;
-        TxMapper::set_tx_uuid(db_tx, local_metadata.root, &bootstrap_tx.tx)?;
-
-        // Both remote and local have transactions beyond bootstrap.
-        if incoming_txs.len() > 1 && local_metadata.root != local_metadata.head {
-            bail!(TolstoyError::NotYetImplemented("Can't purge local state: local excision not supported yet".to_string()));
+    fn local_tx_for_uuid(db_tx: &rusqlite::Transaction, uuid: &Uuid) -> Result<Entid> {
+        match TxMapper::get_tx_for_uuid(db_tx, uuid)? {
+            Some(t) => Ok(t),
+            None => bail!(TolstoyError::TxIncorrectlyMapped(0))
         }
-
-        Ok(SyncResult::LocalFastForward(incoming_txs[1 ..].to_vec()))
     }
 
     pub fn flow(db_tx: &mut rusqlite::Transaction, server_uri: &String, user_uuid: &Uuid) -> Result<SyncResult> {
@@ -229,17 +326,15 @@ impl Syncer {
 
             SyncAction::ServerFastForward => {
                 d(&format!("local HEAD moved."));
+                let upload_from_tx = Syncer::local_tx_for_uuid(db_tx, &locally_known_remote_head)?;
+
+                d(&format!("Fast-forwarding the server."));
+
                 // TODO it's possible that we've successfully advanced remote head previously,
                 // but failed to advance our own local head. If that's the case, and we can recognize it,
                 // our sync becomes just bumping our local head. AFAICT below would currently fail.
-                if let Some(upload_from_tx) = TxMapper::get_tx_for_uuid(db_tx, &locally_known_remote_head)? {
-                    d(&format!("Fast-forwarding the server."));
-                    Syncer::fast_forward_server(db_tx, Some(upload_from_tx), &remote_client, &remote_head)?;
-                    Ok(SyncResult::ServerFastForward)
-                } else {
-                    d(&format!("Unable to fast-forward the server; missing local tx mapping"));
-                    bail!(TolstoyError::TxIncorrectlyMapped(0));
-                }
+                Syncer::fast_forward_server(db_tx, Some(upload_from_tx), &remote_client, &remote_head)?;
+                Ok(SyncResult::ServerFastForward)
             },
 
             SyncAction::LocalFastForward => {
@@ -250,7 +345,13 @@ impl Syncer {
             },
 
             SyncAction::CombineChanges => {
-                Ok(SyncResult::Merge)
+                d(&format!("combining changes from local and remote stores."));
+                let mut local_txs = LocalTxSet::new();
+                Processor::process(db_tx, Some(Syncer::local_tx_for_uuid(db_tx, &locally_known_remote_head)?), &mut local_txs)?;
+                Ok(SyncResult::Merge(
+                    remote_client.get_transaction_data_after(&locally_known_remote_head)?,
+                    local_txs.txs
+                ))
             },
         }
     }

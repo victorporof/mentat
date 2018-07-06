@@ -51,7 +51,7 @@ pub use syncer::{
     SyncResult,
 };
 mod tx_uploader;
-mod logger;
+pub mod logger;
 pub mod tx_mapper;
 pub use tx_mapper::{
     TxMapper,
@@ -61,4 +61,5 @@ pub mod types;
 pub use types::{
     Tx,
     TxPart,
+    Transactable,
 };

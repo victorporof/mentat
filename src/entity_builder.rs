@@ -83,6 +83,7 @@ use errors::{
 
 pub type Terms = (Vec<Entity<TypedValue>>, InternSet<TempId>);
 
+#[derive(Debug)]
 pub struct TermBuilder {
     tempids: InternSet<TempId>,
     terms: Vec<Entity<TypedValue>>,
