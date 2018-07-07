@@ -790,10 +790,15 @@ impl<'conn, 'a, W> Tx<'conn, 'a, W> where W: TransactWatcher {
         self.store.commit_transaction(self.tx_id)?;
         }
 
+        println!("transact_simple_terms: committed transaction!");
+
         db::update_partition_map(self.store, &self.partition_map)?;
+
+        println!("update_partition_map done!");
         self.watcher.done(&self.tx_id, self.schema)?;
 
         if tx_might_update_metadata {
+            println!("tx_might_update_metadata...");
             // Extract changes to metadata from the store.
             let metadata_assertions = self.store.committed_metadata_assertions(self.tx_id)?;
 
@@ -806,11 +811,14 @@ impl<'conn, 'a, W> Tx<'conn, 'a, W> where W: TransactWatcher {
             // regular transactor code paths, updating the schema and materialized views uniformly.
             // But, belt-and-braces: handle it gracefully.
             if new_schema != *self.schema_for_mutation {
+                println!("tx_might_update_metadata !=");
                 let old_schema = (*self.schema_for_mutation).clone(); // Clone the original Schema for comparison.
                 *self.schema_for_mutation.to_mut() = new_schema; // Store the new Schema.
                 db::update_metadata(self.store, &old_schema, &*self.schema_for_mutation, &metadata_report)?;
             }
+            println!("tx_might_update_metadata done");
         }
+        println!("okaying...");
 
         Ok(TxReport {
             tx_id: self.tx_id,

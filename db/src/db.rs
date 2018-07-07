@@ -574,6 +574,8 @@ fn insert_transaction(conn: &rusqlite::Connection, tx: Entid) -> Result<()> {
       FROM temp.search_results
       WHERE added0 IS 1 AND ((rid IS NULL) OR ((rid IS NOT NULL) AND (v0 IS NOT v)))"#;
 
+    println!("insert_transaction s1 {}: {}", s, tx);
+
     let mut stmt = conn.prepare_cached(s)?;
     stmt.execute(&[&tx]).context(DbErrorKind::TxInsertFailedToAddMissingDatoms)?;
 
@@ -584,6 +586,7 @@ fn insert_transaction(conn: &rusqlite::Connection, tx: Entid) -> Result<()> {
       WHERE rid IS NOT NULL AND
             ((added0 IS 0) OR
              (added0 IS 1 AND search_type IS ':db.cardinality/one' AND v0 IS NOT v))"#;
+    println!("insert_transaction s2 {}: {}", s, tx);
 
     let mut stmt = conn.prepare_cached(s)?;
     stmt.execute(&[&tx]).context(DbErrorKind::TxInsertFailedToRetractDatoms)?;
@@ -607,6 +610,8 @@ fn update_datoms(conn: &rusqlite::Connection, tx: Entid) -> Result<()> {
                             (added0 IS 1 AND search_type IS ':db.cardinality/one' AND v0 IS NOT v)))
         DELETE FROM datoms WHERE rowid IN ids"#;
 
+    println!("update_datoms s1: {}", s);
+
     let mut stmt = conn.prepare_cached(s)?;
     stmt.execute(&[]).context(DbErrorKind::DatomsUpdateFailedToRetract)?;
 
@@ -629,6 +634,8 @@ fn update_datoms(conn: &rusqlite::Connection, tx: Entid) -> Result<()> {
       AttributeBitFlags::IndexVAET as u8,
       AttributeBitFlags::IndexFulltext as u8,
       AttributeBitFlags::UniqueValue as u8);
+
+      println!("update_datoms s2: {}: {}", s, tx);
 
     let mut stmt = conn.prepare_cached(&s)?;
     stmt.execute(&[&tx]).context(DbErrorKind::DatomsUpdateFailedToAdd)?;
@@ -817,6 +824,7 @@ impl MentatStoring for rusqlite::Connection {
                 // This will err for duplicates within the tx.
                 format!("INSERT INTO temp.inexact_searches (e0, a0, v0, value_type_tag0, added0, flags0) VALUES {}", values)
             };
+            println!("insert_non_fts_searches: {}", s);
 
             // TODO: consider ensuring we inserted the expected number of rows.
             let mut stmt = self.prepare_cached(s.as_str())?;
@@ -905,6 +913,8 @@ impl MentatStoring for rusqlite::Connection {
             // TODO: make this maximally efficient. It's not terribly inefficient right now.
             let fts_values: String = repeat_values(2, string_count);
             let fts_s: String = format!("INSERT INTO fulltext_values_view (text, searchid) VALUES {}", fts_values);
+            println!("insert_fts_searches fts_s: {}", fts_s);
+            // println!("insert_fts_searches fts_params: {:?}", fts_params);
 
             // TODO: consider ensuring we inserted the expected number of rows.
             let mut stmt = self.prepare_cached(fts_s.as_str())?;
@@ -933,6 +943,7 @@ impl MentatStoring for rusqlite::Connection {
             } else {
                 format!("INSERT INTO temp.inexact_searches (e0, a0, v0, value_type_tag0, added0, flags0) VALUES {}", fts_values)
             };
+            println!("insert_fts_searches s {}", s);
 
             // TODO: consider ensuring we inserted the expected number of rows.
             let mut stmt = self.prepare_cached(s.as_str())?;

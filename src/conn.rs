@@ -408,6 +408,7 @@ impl<'a, 'c> InProgress<'a, 'c> {
     pub fn transact_builder(&mut self, builder: TermBuilder) -> Result<TxReport> {
         builder.build()
                .and_then(|(terms, _tempid_set)| {
+                   println!("build terms: {:?}", terms);
                     self.transact_entities(terms)
                })
     }
@@ -450,10 +451,14 @@ impl<'a, 'c> InProgress<'a, 'c> {
                      &self.schema,
                      w,
                      entities)?;
+            println!("transact_entities: done with transact(...)");
         self.partition_map = next_partition_map;
+        println!("transact_entities: pmap {:?}", self.partition_map);
         if let Some(schema) = next_schema {
             self.schema = schema;
+            println!("transact_entities: schema {:?}", self.schema);
         }
+        println!("transact_entities: report {:?}", report);
         Ok(report)
     }
 
