@@ -181,6 +181,15 @@ impl TermWithTempIds {
     }
 }
 
+// TODO this seems like a sign that I'm doing something wrong...
+impl TermWithoutTempIds {
+    pub(crate) fn rewrap<A, B>(self) -> Term<KnownEntidOr<A>, TypedValueOr<B>> {
+        match self {
+            Term::AddOrRetract(op, n, a, v) => Term::AddOrRetract(op, Left(n), a, Left(v))
+        }
+    }
+}
+
 /// Given a `KnownEntidOr` or a `TypedValueOr`, replace any internal `LookupRef` with the entid from
 /// the given map.  Fail if any `LookupRef` cannot be replaced.
 ///

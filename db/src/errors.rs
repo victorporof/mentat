@@ -291,6 +291,24 @@ pub enum DbErrorKind {
     #[fail(display = "Could not update partition map")]
     FailedToUpdatePartitionMap,
 
+    #[fail(display = "Timelines error: {}", _0)]
+    TimelinesError(String),
+
+    #[fail(display = "Can't operate over mixed timelines")]
+    TimelinesMixed,
+
+    #[fail(display = "Missing transaction ids to move")]
+    TimelinesNoTransactionsSupplied,
+
+    #[fail(display = "Supplied non-existant transaction IDs")]
+    TimelinesInvalidTransactionIds,
+
+    #[fail(display = "Asked to move transactions off main timeline that aren't part of it")]
+    TimelinesNotOnMain,
+
+    #[fail(display = "Tried moving transactions that aren't part of the tail")]
+    TimelinesNotOnTail,
+    
     // It would be better to capture the underlying `rusqlite::Error`, but that type doesn't
     // implement many useful traits, including `Clone`, `Eq`, and `PartialEq`.
     #[fail(display = "SQL error: {}", _0)]
