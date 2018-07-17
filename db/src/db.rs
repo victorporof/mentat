@@ -515,11 +515,18 @@ pub trait MentatStoring {
     fn insert_non_fts_searches<'a>(&self, entities: &'a [ReducedEntity], search_type: SearchType) -> Result<()>;
     fn insert_fts_searches<'a>(&self, entities: &'a [ReducedEntity], search_type: SearchType) -> Result<()>;
 
-    /// Finalize the underlying storage layer after a Mentat transaction.
-    ///
+    /// Prepare the underlyin storage layer for finalization after a Mentat transaction.
+    /// 
     /// Use this to finalize temporary tables, complete indices, revert pragmas, etc, after the
     /// final `insert_non_fts_searches` invocation.
+    fn materialize_transaction(&self, tx_id: Entid) -> Result<()>;
+
+    /// Finalize the underlying storage layer after a Mentat transaction.
+    ///
+    /// This is a final step in performing a transaction.
     fn commit_transaction(&self, tx_id: Entid) -> Result<()>;
+
+    fn resolved_metadata_assertions(&self, tx_id: Entid) -> Result<Vec<(Entid, Entid, TypedValue, bool)>>;
 
     /// Extract metadata-related [e a typed_value added] datoms committed in the given transaction.
     fn committed_metadata_assertions(&self, tx_id: Entid) -> Result<Vec<(Entid, Entid, TypedValue, bool)>>;
@@ -946,23 +953,30 @@ impl MentatStoring for rusqlite::Connection {
     }
 
     fn commit_transaction(&self, tx_id: Entid) -> Result<()> {
-        search(&self)?;
         insert_transaction(&self, tx_id)?;
+        Ok(())
+    }
+
+    fn materialize_transaction(&self, tx_id: Entid) -> Result<()> {
+        search(&self)?;
         update_datoms(&self, tx_id)?;
         Ok(())
     }
 
+    // TODO it's not clear that we need this distinction at all (other than 'comitted' is faster).
+    // Within the scope of a single transaction, these two queries must produce
+    // the same set of metadata assertions. Their source - transactions in case of "committed",
+    // and "search_results" in case of "resolved" shouldn't make a difference.
+    // One important distinction between the two is that the former only makes sense within an
+    // active transaction (while search_results is populated with assertions in question).
+    // 'Committed assertions' can be computed whenever, and from that point of view doesn't
+    // even belong within the "MentatStoring" trait - it could be a simple static method on 'db'.
+    fn resolved_metadata_assertions(&self, tx_id: Entid) ->  Result<Vec<(Entid, Entid, TypedValue, bool)>> {
+        metadata_assertions(self, tx_id, false)
+    }
+
     fn committed_metadata_assertions(&self, tx_id: Entid) -> Result<Vec<(Entid, Entid, TypedValue, bool)>> {
-        // TODO: use concat! to avoid creating String instances.
-        let mut stmt = self.prepare_cached(format!("SELECT e, a, v, value_type_tag, added FROM transactions WHERE tx = ? AND a IN {} ORDER BY e, a, v, value_type_tag, added", entids::METADATA_SQL_LIST.as_str()).as_str())?;
-        let params = [&tx_id as &ToSql];
-        let m: Result<Vec<_>> = stmt.query_and_then(&params[..], |row| -> Result<(Entid, Entid, TypedValue, bool)> {
-            Ok((row.get_checked(0)?,
-                row.get_checked(1)?,
-                TypedValue::from_sql_value_pair(row.get_checked(2)?, row.get_checked(3)?)?,
-                row.get_checked(4)?))
-        })?.collect();
-        m
+        metadata_assertions(self, tx_id, true)
     }
 }
 
@@ -993,6 +1007,57 @@ pub fn update_partition_map(conn: &rusqlite::Connection, partition_map: &Partiti
     let mut stmt = conn.prepare_cached(s.as_str())?;
     stmt.execute(&params[..]).context(DbErrorKind::FailedToUpdatePartitionMap)?;
     Ok(())
+}
+
+fn metadata_assertions(conn: &rusqlite::Connection, tx_id: Entid, comitted: bool) -> Result<Vec<(Entid, Entid, TypedValue, bool)>> {
+    let (params, sql_stmt) = match comitted {
+        true => {
+            (
+                vec![&tx_id as &ToSql],
+                format!(r#"
+                    SELECT e, a, v, value_type_tag, added
+                    FROM transactions
+                    WHERE tx = ? AND a IN {}
+                    ORDER BY e, a, v, value_type_tag, added"#,
+                    entids::METADATA_SQL_LIST.as_str()
+                )
+            )
+        },
+        false => {
+            (
+                vec![],
+                format!(r#"
+                    SELECT e, a, v, value_type_tag, added FROM
+                    (
+                        SELECT e0 as e, a0 as a, v0 as v, value_type_tag0 as value_type_tag, 1 as added
+                        FROM temp.search_results
+                        WHERE a0 IN {} AND added0 IS 1 AND ((rid IS NULL) OR
+                            ((rid IS NOT NULL) AND (v0 IS NOT v)))
+
+                        UNION
+
+                        SELECT e0 as e, a0 as a, v, value_type_tag0 as value_type_tag, 0 as added
+                        FROM temp.search_results
+                        WHERE a0 in {} AND rid IS NOT NULL AND
+                        ((added0 IS 0) OR
+                            (added0 IS 1 AND search_type IS ':db.cardinality/one' AND v0 IS NOT v))
+                    
+                    ) ORDER BY e, a, v, value_type_tag, added"#,
+                    entids::METADATA_SQL_LIST.as_str(), entids::METADATA_SQL_LIST.as_str()
+                )
+            )
+        }
+    };
+    
+    // TODO: use concat! to avoid creating String instances.
+    let mut stmt = conn.prepare_cached(&sql_stmt)?;
+    let m: Result<Vec<_>> = stmt.query_and_then(&params[..], |row| -> Result<(Entid, Entid, TypedValue, bool)> {
+        Ok((row.get_checked(0)?,
+            row.get_checked(1)?,
+            TypedValue::from_sql_value_pair(row.get_checked(2)?, row.get_checked(3)?)?,
+            row.get_checked(4)?))
+    })?.collect();
+    m
 }
 
 /// Update the metadata materialized views based on the given metadata report.
