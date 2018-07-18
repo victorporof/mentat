@@ -105,7 +105,38 @@ impl MetadataReport {
 /// Returns a report summarizing the mutations that were applied.
 pub fn update_attribute_map_from_entid_triples<A, R>(attribute_map: &mut AttributeMap, assertions: A, retractions: R) -> Result<MetadataReport>
     where A: IntoIterator<Item=(Entid, Entid, TypedValue)>,
-          R: IntoIterator<Item=(Entid, Entid, TypedValue)> {
+          R: Iterator<Item=(Entid, Entid, TypedValue)> {
+
+    // Process retractions of schema attributes first. It's allowed to retract a schema attribute
+    // if all of the schema-defining schema attributes are being retracted.
+    // A defining set of attributes is :db/ident, :db/valueType, :db/cardinality.
+    let retractions: Vec<(Entid, Entid, TypedValue)> = retractions.collect();
+    let mut filtered_retractions = vec![];
+    let mut suspect_retractions = vec![];
+
+    // Filter out sets of schema altering retractions.
+    let mut eas = BTreeMap::new();
+    for (e, a, v) in retractions.into_iter() {
+        if a != entids::DB_VALUE_TYPE && a != entids::DB_CARDINALITY {
+            filtered_retractions.push((e, a, v));
+        } else {
+            eas.entry(e).or_insert(vec![]).push(a);
+            suspect_retractions.push((e, a, v));
+        }
+    }
+
+    for (e, a, v) in suspect_retractions.into_iter() {
+        let attributes = eas.get(&e).unwrap();
+
+        // Found a set of retractions which negate a schema.
+        if attributes.contains(&entids::DB_CARDINALITY) &&
+            attributes.contains(&entids::DB_VALUE_TYPE) {
+
+            attribute_map.remove(&e);
+        } else {
+            filtered_retractions.push((e, a, v));
+        }
+    }
 
     fn attribute_builder_to_modify(attribute_id: Entid, existing: &AttributeMap) -> AttributeBuilder {
         existing.get(&attribute_id)
@@ -118,7 +149,7 @@ pub fn update_attribute_map_from_entid_triples<A, R>(attribute_map: &mut Attribu
 
     // For retractions, we start with an attribute builder that's pre-populated with the existing
     // attribute values. That allows us to check existing values and unset them.
-    for (entid, attr, ref value) in retractions.into_iter() {
+    for (entid, attr, ref value) in filtered_retractions {
         let builder = builders.entry(entid).or_insert_with(|| attribute_builder_to_modify(entid, attribute_map));
         match attr {
             // You can only retract :db/unique, :db/isComponent; all others must be altered instead

@@ -1015,14 +1015,29 @@ pub fn update_metadata(conn: &rusqlite::Connection, _old_schema: &Schema, new_sc
                      &[])?;
     }
 
+    // Populate the materialized view directly from datoms.
+    // It's possible that an "ident" was removed, along with its attributes.
+    // That's not counted as an "alteration" of attributes, so we explicitly check
+    // for non-emptiness of 'idents_altered'.
 
-    let mut stmt = conn.prepare(format!("INSERT INTO schema SELECT e, a, v, value_type_tag FROM datoms WHERE e = ? AND a IN {}", entids::SCHEMA_SQL_LIST.as_str()).as_str())?;
-    for &entid in &metadata_report.attributes_installed {
-        stmt.execute(&[&entid as &ToSql])?;
+    // TODO expand metadata report to allow for better signaling for the above.
+
+    if !metadata_report.attributes_installed.is_empty()
+        || !metadata_report.attributes_altered.is_empty()
+        || !metadata_report.idents_altered.is_empty() {
+
+        conn.execute(format!("DELETE FROM schema").as_str(),
+                     &[])?;
+        let s = format!(r#"
+            WITH s(e) AS (SELECT e FROM datoms WHERE a = {})
+            INSERT INTO schema
+            SELECT s.e, a, v, value_type_tag
+            FROM datoms, s
+            WHERE s.e = datoms.e AND a IN {}
+        "#, entids::DB_VALUE_TYPE, entids::SCHEMA_SQL_LIST.as_str());
+        conn.execute(&s, &[])?;
     }
 
-    let mut delete_stmt = conn.prepare(format!("DELETE FROM schema WHERE e = ? AND a IN {}", entids::SCHEMA_SQL_LIST.as_str()).as_str())?;
-    let mut insert_stmt = conn.prepare(format!("INSERT INTO schema SELECT e, a, v, value_type_tag FROM datoms WHERE e = ? AND a IN {}", entids::SCHEMA_SQL_LIST.as_str()).as_str())?;
     let mut index_stmt = conn.prepare("UPDATE datoms SET index_avet = ? WHERE a = ?")?;
     let mut unique_value_stmt = conn.prepare("UPDATE datoms SET unique_value = ? WHERE a = ?")?;
     let mut cardinality_stmt = conn.prepare(r#"
@@ -1035,9 +1050,6 @@ SELECT EXISTS
         left.v <> right.v)"#)?;
 
     for (&entid, alterations) in &metadata_report.attributes_altered {
-        delete_stmt.execute(&[&entid as &ToSql])?;
-        insert_stmt.execute(&[&entid as &ToSql])?;
-
         let attribute = new_schema.require_attribute_for_entid(entid)?;
 
         for alteration in alterations {
@@ -1564,6 +1576,17 @@ mod tests {
         assert_transact!(conn,
                          "[[:db/retract 100 :db/cardinality :db.cardinality/many]]",
                          Err("bad schema assertion: Retracting attribute 8 for entity 100 not permitted."));
+
+        // Cannot retract a characteristic of an installed attribute.
+        assert_transact!(conn,
+                         "[[:db/retract 100 :db/valueType :db.type/long]]",
+                         Err("bad schema assertion: Retracting attribute 7 for entity 100 not permitted."));
+
+        // Can retract all of characterists of an installed attribute in one go.
+        assert_transact!(conn,
+                         "[[:db/retract 100 :db/cardinality :db.cardinality/many]
+                         [:db/retract 100 :db/valueType :db.type/long]
+                         [:db/retract 100 :db/ident :test/ident]]");
 
         // Trying to install an attribute without a :db/ident is allowed.
         assert_transact!(conn, "[[:db/add 101 :db/valueType :db.type/long]
